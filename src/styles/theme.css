@@ -1,0 +1,111 @@
+@import './fonts.css';
+
+/*
+ * Tokens tomados 1:1 del prototipo de Claude Design (references/Dominó (3).html).
+ * La app es dark-only por decisión de diseño (Fase 2): se juega de noche.
+ */
+:root {
+  /* fondos */
+  --bg: #0B1020;
+  --bg-deep: #05070E;
+  --bg-grad: radial-gradient(120% 80% at 50% 0%, #16203A 0%, #0B1020 60%);
+  --bg-grad-mesa: radial-gradient(100% 70% at 50% 45%, #16203A 0%, #0B1020 70%);
+  --bg-grad-finmano: radial-gradient(110% 70% at 50% 20%, #1B2846 0%, #0B1020 65%);
+  --bg-grad-finpartida: radial-gradient(110% 70% at 50% 15%, #22315A 0%, #0B1020 65%);
+  --surface: #131B31;
+  --surface-soft: rgba(19, 27, 49, .7);
+  --surface-sunken: #0E1526;
+  --surface-alt: #243055;
+
+  /* acentos */
+  --gold: #E3B23C;
+  --gold-soft: #F0C24E;
+  --gold-grad: linear-gradient(140deg, #E3B23C, #C08A16);
+  --gold-avatar: linear-gradient(150deg, #F2D089, #C79B33);
+  --red: #C4342C;
+  --red-grad: linear-gradient(140deg, #D8402F, #A8241C);
+  --red-avatar: linear-gradient(150deg, #E5928A, #B8433A);
+  --blue: #5A8FC0;
+  --blue-soft: #7FB0DC;
+  --neutral-avatar: linear-gradient(150deg, #9FB6D0, #6A8099);
+
+  /* texto */
+  --ivory: #F2EAD8;
+  --ivory-bright: #F5EFE0;
+  --ivory-warm: #FFF3E2;
+  --ink: #16203A;
+  --ink-deep: #101728;
+  --muted: #8A93A8;
+  --muted-2: #5C6580;
+  --muted-3: #98A1B6;
+  --muted-4: #B9C3D8;
+  --ivory-dim: #D8D2C4;
+  --ivory-soft: #E7E1D2;
+  --mint-soft: #CFE3D6;
+
+  /* mesa y fichas */
+  --felt: radial-gradient(120% 90% at 50% 30%, #155040 0%, #0D3227 60%, #0A2620 100%);
+  --felt-flat: #0D3227;
+  --tile-face: #EFE6D2;
+  --tile-face-hi: #FFFDF6;
+  --tile-pip: #1A2338;
+
+  /* estado */
+  --ok: #4FA07A;
+  --win: #8FBFA3;
+  --lose: #E0796F;
+
+  /* bordes */
+  --line: rgba(242, 234, 216, .12);
+  --line-strong: rgba(242, 234, 216, .25);
+  --line-gold: rgba(227, 178, 60, .28);
+  --line-red: rgba(196, 52, 44, .35);
+
+  /* sombras y radios */
+  --shadow-card: 0 24px 60px rgba(0, 0, 0, .5);
+  --shadow-cta-red: 0 12px 26px rgba(196, 52, 44, .32);
+  --shadow-tile: 0 5px 12px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .8);
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --r-pill: 999px;
+
+  /* tipografía */
+  --font-display: 'Bodoni Moda', Georgia, serif;
+  --font-ui: 'Jost', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+
+  color-scheme: dark;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--ivory);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input { font: inherit; color: inherit; }
+button { background: none; border: none; cursor: pointer; }
+
+/* Label en versalitas: el patrón que se repite en todas las pantallas del prototipo. */
+.label {
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.numeral { font-family: var(--font-display); }
+
+@keyframes om-spin { to { transform: rotate(360deg); } }
+@keyframes om-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }

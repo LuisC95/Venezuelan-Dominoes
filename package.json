@@ -1,0 +1,35 @@
+{
+  "name": "app",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs",
+    "smoke:match": "node scripts/smoke-match.mjs",
+    "smoke:void": "node scripts/smoke-void.mjs",
+    "ui:check": "node scripts/ui-check.mjs",
+    "ui:mesa": "node scripts/ui-mesa.mjs",
+    "ui:cola": "node scripts/ui-cola.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.114.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^29.1.1",
+    "oxlint": "^1.79.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.2",
+    "vite-plugin-pwa": "^1.3.0"
+  }
+}
