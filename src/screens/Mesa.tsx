@@ -4,12 +4,37 @@ import { useRoom } from '../hooks/useRoom'
 import { useGameState } from '../hooks/useGameState'
 import { Ficha } from '../components/Ficha'
 import { Avatar } from '../components/Avatar'
+import { Chat } from '../components/Chat'
 import * as api from '../lib/api'
 import { isDouble, parseTile } from '../game/tiles'
 import type { Side, Tile } from '../game/tiles'
-import { boardTileSize, otherSeats, teamNames, trailingPasses } from '../game/view'
-import type { GameState, HandEndType, TeamIndex } from '../game/state'
+import { useLatido } from '../hooks/useLatido'
+import { useTamano } from '../hooks/useTamano'
+import { useMensajes } from '../hooks/useMensajes'
+import {
+  hacerSinSeñal, otherSeats, segundosSinSeñal, tamanoMano, tamanoTablero, teamNames, trailingPasses,
+} from '../game/view'
+import type { GameState, HandEndType, SeatInfo, TeamIndex } from '../game/state'
 import s from './Mesa.module.css'
+
+/** Los mismos 60s que exige void_hand en el servidor. */
+const UMBRAL_ANULAR_S = 60
+
+/*
+ * Medidas del acomodo de fichas. Viven aquí y se aplican en línea —no en el
+ * CSS— porque el cálculo que garantiza que todo quepa sin scroll las necesita:
+ * tenerlas en dos sitios sería tenerlas mal en uno de los dos.
+ */
+/** Hueco entre fichas del tablero. */
+const HUECO_TABLERO = 3
+/** Margen que se deja alrededor de la cadena para que no toque el borde. */
+const AIRE_TABLERO = 10
+/** Hueco entre las fichas de tu mano. */
+const HUECO_MANO = 8
+/** Lo que el botón añade alrededor de cada ficha de la mano. */
+const AIRE_MANO = 3
+/** Tu mano no crece más que esto aunque sobre sitio. */
+const FICHA_MANO_MAX = 104
 
 type ScoreCard = {
   name: string
@@ -127,6 +152,99 @@ function FichasReveladas({ state }: { state: GameState }) {
   )
 }
 
+/**
+ * Se cayó NUESTRA conexión. Puerto del overlay del prototipo: no hay nada que
+ * decidir aquí, solo tranquilizar — la mano y el turno viven en el servidor, así
+ * que volver a tener señal es un fetch y nada más.
+ */
+function Reconectando({ onReintentar }: { onReintentar: () => void }) {
+  return (
+    <div className={s.overlay}>
+      <div className={s.spinner} />
+      <div className={s.overlayTitle}>Reconectando</div>
+      <div className={s.overlayText}>
+        Tu mano y el turno quedan guardados. Volvemos a la mesa en cuanto haya señal.
+      </div>
+      <button className={s.overlayGhost} onClick={onReintentar}>Reintentar ahora</button>
+    </div>
+  )
+}
+
+/**
+ * Se cayó la conexión de QUIEN TIENE EL TURNO. La mesa espera indefinidamente:
+ * nadie juega por otro (decisión explícita del usuario). Pasados 60s el
+ * anfitrión puede anular la mano — el mismo umbral que exige `void_hand`, así
+ * que el botón no aparece antes de que el servidor vaya a aceptarlo.
+ *
+ * En `compacto` es la misma cuenta metida en una línea sobre el tablero: la
+ * espera puede durar lo que sea y tapar la pantalla entera todo ese rato no
+ * ayuda, pero el anfitrión tiene que poder anular sin volver al overlay.
+ */
+function EsperandoJugador({
+  jugador,
+  esAnfitrion,
+  busy,
+  compacto,
+  desfase,
+  onAnular,
+  onVerMesa,
+  onVerAviso,
+}: {
+  jugador: SeatInfo
+  esAnfitrion: boolean
+  busy: boolean
+  compacto: boolean
+  /** Lo que le lleva el reloj del servidor a este dispositivo, en ms. */
+  desfase: number
+  onAnular: () => void
+  onVerMesa: () => void
+  onVerAviso: () => void
+}) {
+  const ahora = useLatido(true)
+  const segundos = segundosSinSeñal(jugador.last_seen_at, ahora + desfase)
+  const restan = segundos === null ? null : Math.max(0, UMBRAL_ANULAR_S - segundos)
+  const sePuedeAnular = segundos !== null && segundos >= UMBRAL_ANULAR_S
+  const quien = jugador.display_name ?? 'El de turno'
+
+  if (compacto) {
+    return (
+      <div className={s.espera}>
+        <span className={s.esperaTexto}>
+          Sin señal · {quien} · {segundos ?? '—'} s
+        </span>
+        {esAnfitrion && sePuedeAnular ? (
+          <button className={s.esperaBtn} disabled={busy} onClick={onAnular}>Anular la mano</button>
+        ) : (
+          <button className={s.esperaBtn} onClick={onVerAviso}>Ver aviso</button>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className={s.overlay}>
+      <div className={s.overlayTitle}>Sin señal</div>
+      <div className={s.bigNumber}>{segundos === null ? '—' : segundos}</div>
+      <div className={s.overlayText}>
+        {quien} lleva {segundos ?? '—'} segundos sin conectarse.
+        La mesa lo espera: nadie juega por otro.
+      </div>
+      {esAnfitrion ? (
+        sePuedeAnular ? (
+          <button className={s.overlayBtn} disabled={busy} onClick={onAnular}>
+            Anular la mano
+          </button>
+        ) : (
+          <div className={s.overlayNote}>Podrás anular la mano en {restan} s</div>
+        )
+      ) : (
+        <div className={s.overlayNote}>El anfitrión puede anular la mano al minuto</div>
+      )}
+      <button className={s.overlayGhost} onClick={onVerMesa}>Ver la mesa</button>
+    </div>
+  )
+}
+
 function FinDeMano({
   state,
   roomCode,
@@ -170,19 +288,36 @@ function FinDeMano({
 export function Mesa() {
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
-  const { state: room, status: roomStatus } = useRoom(code)
+  const { state: room, status: roomStatus, conexion, presentes, pulso } = useRoom(code)
   const matchId = room?.current_match_id ?? null
-  const { state, loading, error, refresh } = useGameState(matchId)
+  const { state, loading, error, refresh, desfase } = useGameState(matchId)
+  const chat = useMensajes(room?.room.id, pulso)
 
   // Ficha que calza por las dos puntas: hay que preguntar por cuál.
   const [pending, setPending] = useState<Tile | null>(null)
   const [busy, setBusy] = useState(false)
   const [playError, setPlayError] = useState<string | null>(null)
+  // Mirar el tablero mientras se espera a alguien sin señal: la espera puede ser
+  // larga y bloquear la pantalla entera no ayuda a nadie.
+  const [espiando, setEspiando] = useState(false)
+  const [medirTablero, cajaTablero] = useTamano<HTMLDivElement>()
+  const [medirMano, cajaMano] = useTamano<HTMLDivElement>()
 
-  useEffect(() => { setPending(null) }, [state?.hand?.move_count])
+  useEffect(() => {
+    setPending(null)
+    setEspiando(false)
+  }, [state?.hand?.move_count])
 
   if (roomStatus === 'joining' || (loading && !state)) {
-    return <div className={s.screen}><div className={s.overlay}><div className={s.overlayTitle}>Cargando la mesa</div></div></div>
+    return (
+      <div className={s.screen}>
+        {conexion.perdida ? (
+          <Reconectando onReintentar={conexion.reintentar} />
+        ) : (
+          <div className={s.overlay}><div className={s.overlayTitle}>Cargando la mesa</div></div>
+        )}
+      </div>
+    )
   }
 
   if (!room || !matchId || !state || !state.hand) {
@@ -206,8 +341,25 @@ export function Mesa() {
 
   const meRow = me.seat !== null ? seats[me.seat] : null
   const others = otherSeats(me.seat, seats)
-  const tileSize = boardTileSize(board.length)
   const passLine = trailingPasses(state.recent_moves, seats)
+
+  // El tamaño sale de lo que mide el tablero, no de una fórmula por número de
+  // fichas: es la única forma de garantizar que la cadena entera se vea sin
+  // scroll cuando el hueco cambia (se abre el chat, entra un aviso, gira el
+  // teléfono). Mientras no haya medida se usa la estimación de siempre.
+  const tileSize = tamanoTablero(
+    board.map((t) => isDouble(t.tile)),
+    { ancho: cajaTablero.ancho - AIRE_TABLERO * 2, alto: cajaTablero.alto - AIRE_TABLERO * 2 },
+    HUECO_TABLERO,
+  )
+  const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, FICHA_MANO_MAX)
+
+  const sinSeñal = hacerSinSeñal(presentes, me.profile_id)
+  const enTurno = hand.current_seat !== null ? seats[hand.current_seat] : null
+  // Solo se espera a OTRO: si el que no tiene señal fuera yo, no estaría viendo
+  // esto, y el overlay que toca es el de reconectando.
+  const esperandoA =
+    !handOver && enTurno && enTurno.seat !== me.seat && sinSeñal(enTurno) ? enTurno : null
 
   async function play(tile: Tile, side?: Side) {
     setBusy(true)
@@ -234,6 +386,19 @@ export function Mesa() {
     : myTurn
       ? 'Tu turno · juega una ficha'
       : `Juega ${seats[hand.current_seat ?? 0]?.display_name ?? '…'}`
+
+  async function anular() {
+    setBusy(true)
+    setPlayError(null)
+    try {
+      await api.voidHand(hand!.id)
+      await refresh()
+    } catch (e) {
+      setPlayError(e instanceof Error ? e.message : 'No se pudo anular la mano')
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function startNext() {
     setBusy(true)
@@ -266,8 +431,8 @@ export function Mesa() {
       <div className={s.top}>
         <button className={s.back} onClick={() => navigate(`/sala/${code}`)}>←</button>
         <span
-          className={`${s.conn} ${meRow && !meRow.connected ? s.connLost : s.connOk}`}
-          title={meRow?.connected === false ? 'Sin señal' : 'Conectado'}
+          className={`${s.conn} ${conexion.perdida || (meRow && !meRow.connected) ? s.connLost : s.connOk}`}
+          title={conexion.perdida || meRow?.connected === false ? 'Sin señal' : 'Conectado'}
         />
         <div className={s.scores}>
           {scores.map((t) => (
@@ -296,26 +461,40 @@ export function Mesa() {
           {others.map((p) => {
             const active = p.is_turn
             const isPartner = me.seat !== null && p.team_index === me.team_index
+            const caido = sinSeñal(p)
             return (
               <div key={p.seat} className={`${s.rival} ${active ? s.rivalActive : ''}`}>
                 <Avatar name={p.display_name} size={34} variant={isPartner ? 'gold' : 'neutral'} />
                 <span className={s.rivalName}>
-                  {p.display_name}{isPartner ? ' · pareja' : ''}
+                  {p.display_name}{p.is_bot ? ' · bot' : isPartner ? ' · pareja' : ''}
                 </span>
-                <span className={`${s.rivalMeta} ${active ? s.rivalMetaActive : ''} ${!p.connected ? s.rivalOff : ''}`}>
-                  {p.connected ? `${p.tiles_left} fichas` : 'sin señal'}
+                <span className={`${s.rivalMeta} ${active ? s.rivalMetaActive : ''} ${caido ? s.rivalOff : ''}`}>
+                  {caido ? 'sin señal' : `${p.tiles_left} fichas`}
                 </span>
               </div>
             )
           })}
         </div>
 
-        <div className={s.felt}>
+        {esperandoA && espiando && (
+          <EsperandoJugador
+            jugador={esperandoA}
+            esAnfitrion={me.is_host}
+            busy={busy}
+            compacto
+            desfase={desfase}
+            onAnular={anular}
+            onVerMesa={() => setEspiando(true)}
+            onVerAviso={() => setEspiando(false)}
+          />
+        )}
+
+        <div className={s.felt} ref={medirTablero}>
           {board.length === 0 ? (
             <div className={s.feltEmpty}>Mesa limpia</div>
           ) : (
             <div className={s.board}>
-              <div className={s.boardInner}>
+              <div className={s.boardInner} style={{ gap: HUECO_TABLERO }}>
                 {board.map((t) => (
                   <Ficha
                     key={t.position}
@@ -333,6 +512,14 @@ export function Mesa() {
           </div>
           {passLine && <div className={s.passLine}>{passLine}</div>}
         </div>
+
+        <Chat
+          mensajes={chat.mensajes}
+          desfase={chat.desfase}
+          error={chat.error}
+          enviando={chat.enviando}
+          onEnviar={chat.enviar}
+        />
       </div>
 
       <div className={s.bottom}>
@@ -356,7 +543,7 @@ export function Mesa() {
         )}
 
         {iAmSeated ? (
-          <div className={s.hand}>
+          <div className={s.hand} ref={medirMano} style={{ gap: HUECO_MANO }}>
             {myHand.map((t) => {
               const [a, b] = parseTile(t.tile)
               const playable = myTurn && t.sides.length > 0 && !handOver
@@ -367,10 +554,11 @@ export function Mesa() {
                     s.tile,
                     pending === t.tile ? s.tileChosen : playable ? s.tilePlayable : s.tileDead,
                   ].join(' ')}
+                  style={{ padding: AIRE_MANO }}
                   disabled={!playable || busy}
                   onClick={() => tapTile(t.tile, t.sides)}
                 >
-                  <Ficha top={a} bottom={b} size={104} vertical />
+                  <Ficha top={a} bottom={b} size={manoSize} vertical />
                 </button>
               )
             })}
@@ -379,6 +567,22 @@ export function Mesa() {
           <div className={s.turnLabel} style={{ textAlign: 'center' }}>Estás observando</div>
         )}
       </div>
+
+      {/* Nuestra propia caída manda: si no hay red, lo de los demás no se sabe. */}
+      {conexion.perdida ? (
+        <Reconectando onReintentar={conexion.reintentar} />
+      ) : esperandoA && !espiando ? (
+        <EsperandoJugador
+          jugador={esperandoA}
+          esAnfitrion={me.is_host}
+          busy={busy}
+          compacto={false}
+          desfase={desfase}
+          onAnular={anular}
+          onVerMesa={() => setEspiando(true)}
+          onVerAviso={() => setEspiando(false)}
+        />
+      ) : null}
     </div>
   )
 }

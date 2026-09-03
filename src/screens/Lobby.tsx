@@ -8,6 +8,8 @@ import type { RoomMember, Seat } from '../game/state'
 import s from './Lobby.module.css'
 
 const SEATS: Seat[] = [0, 1, 2, 3]
+/** El mismo tope que impone add_bot en el servidor. */
+const MAX_BOTS = 2
 
 export function Lobby() {
   const { code } = useParams<{ code: string }>()
@@ -51,6 +53,8 @@ export function Lobby() {
   const observers = members.filter((m) => m.seat === null)
   const seatedCount = bySeat.size
   const inLobby = room.status === 'lobby'
+  const bots = members.filter((m) => m.is_bot).length
+  const librosParaBot = Math.min(4 - seatedCount, MAX_BOTS - bots)
   const iAmSeeking = observers.find((o) => o.profile_id === me.profile_id)?.seeking_partner ?? false
 
   function badgeOf(m: RoomMember) {
@@ -112,6 +116,10 @@ export function Lobby() {
             const m = bySeat.get(seat)
             const gold = seat % 2 === 0
             const mine = m?.profile_id === me.profile_id
+            // Un asiento con bot solo lo toca el anfitrión, y para quitarlo:
+            // sentarse encima lo intercambiaría de sitio, que no es lo que
+            // nadie quiere al tocarlo.
+            const quitable = !!m?.is_bot && me.is_host && inLobby
             return (
               <button
                 key={seat}
@@ -121,8 +129,10 @@ export function Lobby() {
                   m ? '' : s.seatEmpty,
                   mine ? s.seatMine : '',
                 ].join(' ')}
-                disabled={busy || !inLobby || mine}
-                onClick={() => run(() => api.takeSeat(room.id, seat))}
+                disabled={busy || !inLobby || mine || (!!m?.is_bot && !quitable)}
+                onClick={() => run(() =>
+                  quitable ? api.removeBot(room.id, seat) : api.takeSeat(room.id, seat),
+                )}
               >
                 <span className={`${s.teamLabel} ${gold ? s.teamGold : s.teamRed}`}>
                   {gold ? 'Pareja 1' : 'Pareja 2'}
@@ -133,7 +143,10 @@ export function Lobby() {
                       <Avatar name={m.display_name} size={36} variant={gold ? 'gold' : 'red'} />
                       <span style={{ minWidth: 0 }}>
                         <span className={s.name}>{m.display_name}</span>
-                        {!m.connected && <span className={s.offline}>sin señal</span>}
+                        {m.is_bot && (
+                          <span className={s.botTag}>{quitable ? 'bot · quitar' : 'bot'}</span>
+                        )}
+                        {!m.is_bot && !m.connected && <span className={s.offline}>sin señal</span>}
                       </span>
                     </>
                   ) : (
@@ -220,6 +233,21 @@ export function Lobby() {
               Pedir turno · entrar a la cola
             </button>
           )
+        )}
+        {me.is_host && inLobby && librosParaBot > 0 && (
+          <button
+            className={s.ghost}
+            disabled={busy}
+            onClick={() => run(async () => {
+              // De uno en uno: el servidor es quien lleva la cuenta del tope.
+              for (const seat of SEATS) {
+                if (bySeat.has(seat)) continue
+                try { await api.addBot(room.id, seat) } catch { break }
+              }
+            })}
+          >
+            {librosParaBot === 1 ? 'Rellenar con un bot' : `Rellenar con ${librosParaBot} bots`}
+          </button>
         )}
         {me.is_host && inLobby && (
           <button className={s.cta} disabled={busy || seatedCount < 4}

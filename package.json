@@ -11,9 +11,16 @@
     "smoke": "node scripts/smoke.mjs",
     "smoke:match": "node scripts/smoke-match.mjs",
     "smoke:void": "node scripts/smoke-void.mjs",
+    "smoke:bots": "node scripts/smoke-bots.mjs",
+    "bench:bots": "node scripts/bench-bots.mjs",
     "ui:check": "node scripts/ui-check.mjs",
     "ui:mesa": "node scripts/ui-mesa.mjs",
-    "ui:cola": "node scripts/ui-cola.mjs"
+    "ui:cola": "node scripts/ui-cola.mjs",
+    "ui:reconexion": "node scripts/ui-reconexion.mjs",
+    "ui:chat": "node scripts/ui-chat.mjs",
+    "ui:perfil": "node scripts/ui-perfil.mjs",
+    "ui:ajuste": "node scripts/ui-ajuste.mjs",
+    "ui:bots": "node scripts/ui-bots.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

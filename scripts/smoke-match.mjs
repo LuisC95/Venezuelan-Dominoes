@@ -22,6 +22,11 @@ const ps = await Promise.all(names.map(makePlayer))
 const [rafa, , , , yorman, gaby] = ps
 const byId = Object.fromEntries(ps.map((p) => [p.id, p]))
 
+// Las estadísticas son acumulativas y sobreviven a `delete from rooms`, así que
+// se mide el ANTES y se comprueba la diferencia. Comparar contra números
+// absolutos solo funcionaba con la base recién estrenada.
+const antes = (await rpc(rafa, 'get_profile_history', {})).stats
+
 const room = await rpc(rafa, 'create_room', { p_max_size: 8, p_points_target: 100 })
 for (const p of ps.slice(1)) await rpc(p, 'join_room', { p_code: room.code })
 await rpc(yorman, 'request_turn', { p_room_id: room.id })
@@ -106,9 +111,12 @@ check('mano 1 de la partida nueva repartida', st2.hand.hand_number === 1)
 head('Estadísticas')
 const hist = await rpc(rafa, 'get_profile_history', {})
 console.log('  Rafa:', JSON.stringify(hist.stats))
-check('se contó la partida jugada', hist.stats.matches_played === 1)
-check('se contaron manos ganadas', hist.stats.hands_won >= 1)
-check('aparece en el historial', hist.matches.length === 1, hist.matches[0]?.score)
+check('se contó la partida jugada', hist.stats.matches_played === antes.matches_played + 1,
+  `${antes.matches_played} -> ${hist.stats.matches_played}`)
+check('se contaron manos ganadas', hist.stats.hands_won > antes.hands_won,
+  `${antes.hands_won} -> ${hist.stats.hands_won}`)
+check('aparece en el historial', hist.matches.some((m) => m.room_code === room.code),
+  hist.matches.find((m) => m.room_code === room.code)?.score)
 check('sabe con quién jugó', !!hist.top_partner, hist.top_partner?.display_name)
 
 console.log(`\n${failures === 0 ? 'TODO EN ORDEN' : failures + ' FALLO(S)'}`)

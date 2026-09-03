@@ -68,13 +68,18 @@
   position: relative; overflow: hidden;
   box-shadow: inset 0 0 60px rgba(0, 0, 0, .5);
 }
+/*
+ * Sin scroll y sin padding: el tamaño de las fichas se calcula contra lo que
+ * mide el felt (ver AIRE_TABLERO y HUECO_TABLERO en Mesa.tsx), así que el aire
+ * y el hueco los pone el cálculo. El overflow oculto es solo un cinturón.
+ */
 .board {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  padding: 16px; overflow: auto;
+  overflow: hidden;
 }
 .boardInner {
-  display: flex; flex-wrap: wrap; gap: 3px;
+  display: flex; flex-wrap: wrap;
   align-items: center; justify-content: center; max-width: 100%;
 }
 .feltEmpty {
@@ -115,9 +120,10 @@
 }
 .cancel { padding: 10px; color: var(--muted-2); font-size: 12px; letter-spacing: .1em; }
 
-.hand { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; align-items: flex-end; }
+/* El hueco y el padding los pone Mesa.tsx: son parte del cálculo del tamaño. */
+.hand { display: flex; padding: 4px 0 8px; align-items: flex-end; justify-content: center; }
 .tile {
-  flex: 0 0 auto; border-radius: 12px; padding: 3px;
+  flex: 0 0 auto; border-radius: 12px;
   background: transparent; transition: transform .16s;
 }
 .tilePlayable {
@@ -144,7 +150,45 @@
   padding: 12px 20px; border: 1px solid rgba(242, 234, 216, .22); border-radius: var(--r-sm);
   color: var(--ivory-dim); font-weight: 500; font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
 }
-.bigNumber { font-family: var(--font-display); font-size: 64px; line-height: .9; color: var(--gold); }
+.bigNumber {
+  font-family: var(--font-display); font-size: 64px; line-height: .9;
+  color: var(--gold); font-variant-numeric: tabular-nums;
+}
+.overlayNote {
+  font-weight: 500; font-size: 10px; line-height: 1.4;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--muted-2);
+  text-align: center;
+}
+/* Aviso compacto de espera: la misma cuenta que el overlay, en una línea. */
+.espera {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-gold); border-radius: var(--r-pill);
+  background: rgba(227, 178, 60, .1);
+}
+.esperaTexto {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 500; font-size: 10px; line-height: 1;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.esperaBtn {
+  flex: 0 0 auto;
+  padding: 6px 11px; border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  color: var(--ivory-dim);
+  font-weight: 600; font-size: 9px; line-height: 1;
+  letter-spacing: .16em; text-transform: uppercase;
+}
+.esperaBtn:disabled { opacity: .55; cursor: wait; }
+
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 2px solid rgba(227, 178, 60, .25); border-top-color: var(--gold);
+  animation: om-spin 1s linear infinite;
+}
 .error { color: var(--lose); font-size: 12px; line-height: 1.5; text-align: center; }
 
 /* --- fin de mano --- */

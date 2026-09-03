@@ -122,6 +122,9 @@ export function FinPartida() {
           <div className={s.espera}>El anfitrión arranca la siguiente</div>
         )}
         <button className={s.ghost} onClick={() => navigate(`/sala/${code}`)}>Volver a la sala</button>
+        <button className={s.enlace} onClick={() => navigate('/perfil')}>
+          Ver historial y estadísticas
+        </button>
       </div>
     </div>
   )

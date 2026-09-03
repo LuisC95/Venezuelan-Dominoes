@@ -26,3 +26,5 @@ dist-ssr
 .env.local
 
 scripts/.test-sessions.json
+
+.vercel

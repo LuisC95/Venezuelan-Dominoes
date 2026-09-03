@@ -3,7 +3,7 @@
  * apenas la lista de llamadas permitidas, tipada.
  */
 import { supabase } from './supabase'
-import type { GameState, ProfileHistory, RoomState, Seat } from '../game/state'
+import type { GameState, Mensajes, MessageKind, ProfileHistory, RoomState, Seat } from '../game/state'
 import type { Side, Tile } from '../game/tiles'
 
 async function call<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -52,6 +52,13 @@ export const setRoomConfig = (
     p_capicua_doble: cfg.capicuaDoble ?? null,
   })
 
+// --- bots -------------------------------------------------------------------
+/** Máximo dos por mesa; lo impone el servidor. */
+export const addBot = (roomId: string, seat: Seat) =>
+  call<void>('add_bot', { p_room_id: roomId, p_seat: seat })
+export const removeBot = (roomId: string, seat: Seat) =>
+  call<void>('remove_bot', { p_room_id: roomId, p_seat: seat })
+
 // --- cola y parejas ---------------------------------------------------------
 export const requestTurn = (roomId: string) => call<void>('request_turn', { p_room_id: roomId })
 export const pairWith = (roomId: string, partnerId: string) =>
@@ -77,5 +84,7 @@ export const getProfileHistory = (profileId?: string, limit = 12) =>
   call<ProfileHistory>('get_profile_history', { p_profile_id: profileId ?? null, p_limit: limit })
 
 // --- chat -------------------------------------------------------------------
-export const sendMessage = (roomId: string, body: string, kind: 'chat' | 'emote' = 'chat') =>
+export const sendMessage = (roomId: string, body: string, kind: MessageKind = 'chat') =>
   call<void>('send_message', { p_room_id: roomId, p_body: body, p_kind: kind })
+export const getMessages = (roomId: string, limit = 30) =>
+  call<Mensajes>('get_messages', { p_room_id: roomId, p_limit: limit })
