@@ -103,6 +103,6 @@ el motor desde dentro. Es lo que impide fabricarse una victoria por REST.
 - [x] Etapa 10 — perfil: historial y estadísticas
 - [x] Etapa 8 — mesa: fichas siempre visibles sin scroll
 
-Guía completa para retomar el trabajo (o para otro agente): `../AGENTS.md`
+Guía completa para retomar el trabajo (o para otro agente): `AGENTS.md`
 - [ ] Etapa 11 — probarlo con el grupo
 >>>>>>> e4c8596 (first commit)
