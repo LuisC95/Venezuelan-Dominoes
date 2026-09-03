@@ -56,7 +56,19 @@ export function Inicio() {
 
       <div className={s.card}>
         <div className={s.identity}>
-          <div className={s.avatar}>{initial}</div>
+          {/* El avatar es el acceso al historial, como en el prototipo. Solo
+              tiene sentido cuando ya hay perfil guardado. */}
+          {profile ? (
+            <button
+              className={s.avatar}
+              title="Ver historial y estadísticas"
+              onClick={() => navigate('/perfil')}
+            >
+              {initial}
+            </button>
+          ) : (
+            <div className={s.avatar}>{initial}</div>
+          )}
           <div className={s.field}>
             <label className={s.fieldLabel} htmlFor="nombre">Tu nombre</label>
             <input

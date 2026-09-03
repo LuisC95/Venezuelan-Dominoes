@@ -3,7 +3,7 @@
  * apenas la lista de llamadas permitidas, tipada.
  */
 import { supabase } from './supabase'
-import type { GameState, ProfileHistory, RoomState, Seat } from '../game/state'
+import type { GameState, Mensajes, MessageKind, ProfileHistory, RoomState, Seat } from '../game/state'
 import type { Side, Tile } from '../game/tiles'
 
 async function call<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -77,5 +77,7 @@ export const getProfileHistory = (profileId?: string, limit = 12) =>
   call<ProfileHistory>('get_profile_history', { p_profile_id: profileId ?? null, p_limit: limit })
 
 // --- chat -------------------------------------------------------------------
-export const sendMessage = (roomId: string, body: string, kind: 'chat' | 'emote' = 'chat') =>
+export const sendMessage = (roomId: string, body: string, kind: MessageKind = 'chat') =>
   call<void>('send_message', { p_room_id: roomId, p_body: body, p_kind: kind })
+export const getMessages = (roomId: string, limit = 30) =>
+  call<Mensajes>('get_messages', { p_room_id: roomId, p_limit: limit })

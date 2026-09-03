@@ -17,12 +17,19 @@ export function useGameState(matchId: string | null | undefined) {
   const [state, setState] = useState<GameState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  /** Cuánto le lleva el reloj del servidor al de este dispositivo, en ms. */
+  const [desfase, setDesfase] = useState(0)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const refresh = useCallback(async () => {
     if (!matchId) return
     try {
-      setState(await api.getGameState(matchId))
+      const nuevo = await api.getGameState(matchId)
+      // Se mide al llegar la respuesta: la latencia solo puede hacer que
+      // creamos que el servidor va más atrasado de lo que va, y eso es el lado
+      // seguro para un umbral que el servidor va a revalidar.
+      setDesfase(Date.parse(nuevo.now) - Date.now())
+      setState(nuevo)
       setError(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo leer la mesa')
@@ -56,5 +63,5 @@ export function useGameState(matchId: string | null | undefined) {
     }
   }, [matchId, refresh])
 
-  return { state, loading, error, refresh }
+  return { state, loading, error, refresh, desfase }
 }

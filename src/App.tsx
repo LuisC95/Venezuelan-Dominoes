@@ -5,6 +5,7 @@ import { Lobby } from './screens/Lobby'
 import { Mesa } from './screens/Mesa'
 import { Cola } from './screens/Cola'
 import { FinPartida } from './screens/FinPartida'
+import { Perfil } from './screens/Perfil'
 
 function Splash({ text = 'Entrando' }: { text?: string }) {
   return (
@@ -48,6 +49,7 @@ function Gate() {
       <Route path="/sala/:code/mesa" element={<Mesa />} />
       <Route path="/sala/:code/cola" element={<Cola />} />
       <Route path="/sala/:code/resultado/:matchId?" element={<FinPartida />} />
+      <Route path="/perfil/:profileId?" element={<Perfil />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

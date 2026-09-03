@@ -87,6 +87,12 @@ export type RecentMove = {
 }
 
 export type GameState = {
+  /**
+   * Reloj del servidor al leer el estado. Es la referencia para cualquier
+   * cuenta contra `last_seen_at` o `turn_started_at`: el reloj del teléfono
+   * puede ir corrido varios segundos y el umbral de `void_hand` se mide aquí.
+   */
+  now: string
   room: RoomInfo
   match: MatchInfo
   hand: HandInfo | null
@@ -134,6 +140,25 @@ export type RoomState = {
   members: RoomMember[]
   queue: QueueEntry[]
   current_match_id: string | null
+}
+
+export type MessageKind = 'chat' | 'emote'
+
+export type Mensaje = {
+  id: string
+  profile_id: string
+  display_name: string
+  kind: MessageKind
+  body: string
+  created_at: string
+  /** true si lo escribiste tú; lo resuelve el servidor. */
+  mine: boolean
+}
+
+export type Mensajes = {
+  /** Reloj del servidor: las burbujas se apagan contando contra esta hora. */
+  now: string
+  messages: Mensaje[]
 }
 
 export type ProfileHistory = {

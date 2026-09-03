@@ -14,9 +14,102 @@ export function partnerSeat(mySeat: Seat): Seat {
   return ((mySeat + 2) % 4) as Seat
 }
 
-/** Las fichas encogen cuando la fila crece, para que quepa sin hacer scroll. */
+/**
+ * Estimación de emergencia mientras no se ha medido el tablero (primer render,
+ * o un entorno sin layout como jsdom). El tamaño bueno lo da `tamanoTablero`.
+ */
 export function boardTileSize(count: number): number {
   return Math.round(Math.max(30, 56 - Math.max(0, count - 8) * 1.6))
+}
+
+export type Caja = { ancho: number; alto: number }
+
+/** Por debajo de esto la ficha deja de leerse; por encima, no crece más. */
+export const FICHA_MIN = 22
+export const FICHA_MAX = 64
+
+/**
+ * Lo que ocupa una ficha de lado largo `size`. Un doble va girado —así se pone
+ * en la mesa de verdad— y por eso mide al revés que las demás.
+ */
+export function medidaFicha(size: number, doble: boolean): { ancho: number; alto: number } {
+  const corto = Math.round(size / 2)
+  return doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto }
+}
+
+/**
+ * Simula el reparto en líneas de `flex-wrap` y devuelve el alto de cada una.
+ * Se simula en vez de estimarse porque los dobles miden distinto: contar
+ * "fichas por fila" daría de más justo en las manos con muchos dobles, que son
+ * las que peor caben.
+ */
+export function filasDeCadena(dobles: boolean[], size: number, ancho: number, gap: number): number[] {
+  const altos: number[] = []
+  let filaAncho = 0
+  let filaAlto = 0
+  let vacia = true
+
+  for (const doble of dobles) {
+    const m = medidaFicha(size, doble)
+    if (!vacia && filaAncho + gap + m.ancho > ancho) {
+      altos.push(filaAlto)
+      filaAncho = m.ancho
+      filaAlto = m.alto
+    } else {
+      filaAncho = vacia ? m.ancho : filaAncho + gap + m.ancho
+      filaAlto = Math.max(filaAlto, m.alto)
+      vacia = false
+    }
+  }
+  if (!vacia) altos.push(filaAlto)
+  return altos
+}
+
+/** Alto total de la cadena, con los huecos entre filas. */
+export function altoDeCadena(altos: number[], gap: number): number {
+  if (altos.length === 0) return 0
+  return altos.reduce((a, b) => a + b, 0) + gap * (altos.length - 1)
+}
+
+/**
+ * El tamaño de ficha más grande con el que la cadena entera **cabe sin scroll**
+ * en la caja dada. Se prueba de mayor a menor: son 40 tanteos como mucho sobre
+ * 28 fichas, nada que se note.
+ *
+ * Si la caja todavía no está medida (0×0) devuelve la estimación de siempre;
+ * es lo que ve jsdom, que no hace layout.
+ */
+export function tamanoTablero(dobles: boolean[], caja: Caja, gap: number): number {
+  if (caja.ancho <= 0 || caja.alto <= 0) return boardTileSize(dobles.length)
+  if (dobles.length === 0) return FICHA_MAX
+
+  for (let size = FICHA_MAX; size > FICHA_MIN; size--) {
+    // Una ficha normal mide `size` de ancho: más ancha que la caja no cabe ni sola.
+    if (size > caja.ancho) continue
+    const altos = filasDeCadena(dobles, size, caja.ancho, gap)
+    if (altoDeCadena(altos, gap) <= caja.alto) return size
+  }
+  return FICHA_MIN
+}
+
+/**
+ * Lo mismo para tu propia mano, que va en una sola fila de fichas verticales:
+ * ahí no hay que simular nada, se despeja.
+ */
+export function tamanoMano(
+  cuantas: number,
+  ancho: number,
+  gap: number,
+  aire: number,
+  max: number,
+): number {
+  if (cuantas <= 0 || ancho <= 0) return max
+  // Se despeja el lado CORTO —que es lo que ocupa de ancho una ficha vertical— y
+  // el largo es su doble. Al revés no vale: `Ficha` pinta el corto como
+  // `round(size / 2)`, así que un lado largo impar se redondea hacia arriba y
+  // cada ficha se pasa medio píxel. Con siete, eso ya son 3px de scroll.
+  const corto = Math.floor((ancho - gap * (cuantas - 1)) / cuantas) - aire * 2
+  return Math.max(FICHA_MIN, Math.min(max, corto * 2))
 }
 
 /**
@@ -66,4 +159,25 @@ export function pairNames(state: GameState, team: TeamIndex): string {
 export function teamLabels(state: GameState): [string, string] {
   if (state.me.team_index === null) return [pairNames(state, 0), pairNames(state, 1)]
   return teamNames(state)
+}
+
+/**
+ * Quién no tiene señal.
+ *
+ * El servidor manda: `connected` sale de `last_seen_at` con 30s de margen.
+ * Presence del canal lo detecta al instante cuando alguien cierra la app, así
+ * que se usa para adelantar el aviso — pero solo si el canal **nos ve a
+ * nosotros**. Si no aparecemos en la lista es que el sync todavía no llegó, y
+ * ahí declarar caído a nadie sería inventarse una desconexión.
+ */
+export function hacerSinSeñal(presentes: string[], miId: string) {
+  const confiable = presentes.includes(miId)
+  return (p: { profile_id: string; connected: boolean }) =>
+    !p.connected || (confiable && !presentes.includes(p.profile_id))
+}
+
+/** Segundos que lleva callado alguien, o null si nunca dio señales. */
+export function segundosSinSeñal(lastSeenAt: string | null, ahora: number): number | null {
+  if (!lastSeenAt) return null
+  return Math.max(0, Math.floor((ahora - Date.parse(lastSeenAt)) / 1000))
 }
