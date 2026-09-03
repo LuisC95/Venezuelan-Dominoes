@@ -164,7 +164,11 @@ export function teamLabels(state: GameState): [string, string] {
 /**
  * Quién no tiene señal.
  *
- * El servidor manda: `connected` sale de `last_seen_at` con 30s de margen.
+ * Un bot nunca: no late ni se suscribe al canal, así que Presence no lo ve y
+ * sin esta salida temprana la mesa lo daría por caído a los pocos segundos.
+ *
+ * Para los demás manda el servidor: `connected` sale de `last_seen_at` con 30s
+ * de margen.
  * Presence del canal lo detecta al instante cuando alguien cierra la app, así
  * que se usa para adelantar el aviso — pero solo si el canal **nos ve a
  * nosotros**. Si no aparecemos en la lista es que el sync todavía no llegó, y
@@ -172,8 +176,8 @@ export function teamLabels(state: GameState): [string, string] {
  */
 export function hacerSinSeñal(presentes: string[], miId: string) {
   const confiable = presentes.includes(miId)
-  return (p: { profile_id: string; connected: boolean }) =>
-    !p.connected || (confiable && !presentes.includes(p.profile_id))
+  return (p: { profile_id: string; connected: boolean; is_bot?: boolean }) =>
+    !p.is_bot && (!p.connected || (confiable && !presentes.includes(p.profile_id)))
 }
 
 /** Segundos que lleva callado alguien, o null si nunca dio señales. */

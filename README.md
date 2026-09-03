@@ -38,6 +38,8 @@ partidas, manos, fichas y mensajes, y deja intactas las identidades.
 node scripts/smoke.mjs        # sala, cola, RLS, trampas, una mano completa
 node scripts/smoke-match.mjs  # partida entera a 100 + rey de la cancha + estadísticas
 node scripts/smoke-void.mjs   # anular una mano por desconexión (tarda ~80s a propósito)
+node scripts/smoke-bots.mjs   # bots: sentarlos, que jueguen solos y que no se puedan trampear
+node scripts/bench-bots.mjs   # torneo: los bots contra juego al azar (no es un test, es la vara)
 
 npm run build && npx vite preview --port 4173 &   # y en otra terminal:
 node scripts/ui-check.mjs      # inicio → crear sala → lobby que se actualiza solo
@@ -47,6 +49,7 @@ node scripts/ui-reconexion.mjs # overlay de reconexión y anular mano por descon
 node scripts/ui-chat.mjs       # emotes, chat en vivo y freno del servidor
 node scripts/ui-perfil.mjs     # historial, estadísticas y pareja frecuente
 node scripts/ui-ajuste.mjs     # que las fichas quepan sin scroll, jugada a jugada
+node scripts/ui-bots.mjs       # rellenar la mesa con bots desde el lobby
 ```
 
 `ui-check` existe porque en esta máquina falta `libnspr4`/`libnss3` y Chromium no
@@ -84,6 +87,7 @@ scripts/               pruebas de humo del motor contra Supabase
 | `get_game_state` / `get_room_state` | miembros | todo lo que esa persona puede ver |
 | `get_profile_history` | cualquiera | estadísticas e historial de un jugador |
 | `send_message` / `get_messages` | miembros | chat y emotes de la sala |
+| `add_bot` / `remove_bot` | anfitrión | rellenar puestos vacíos (máximo 2 por mesa) |
 | `heartbeat` | miembros | presencia, cada ~20s |
 
 Las internas (`deal_hand`, `resolve_hand`, `advance_turn`, `ensure_team`,
@@ -102,6 +106,7 @@ el motor desde dentro. Es lo que impide fabricarse una victoria por REST.
 - [x] Etapa 9 — chat y emotes en la mesa
 - [x] Etapa 10 — perfil: historial y estadísticas
 - [x] Etapa 8 — mesa: fichas siempre visibles sin scroll
+- [x] Bots para rellenar puestos vacíos (fuera del plan original)
 
 Guía completa para retomar el trabajo (o para otro agente): `AGENTS.md`
 - [ ] Etapa 11 — probarlo con el grupo

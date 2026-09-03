@@ -52,6 +52,13 @@ export const setRoomConfig = (
     p_capicua_doble: cfg.capicuaDoble ?? null,
   })
 
+// --- bots -------------------------------------------------------------------
+/** Máximo dos por mesa; lo impone el servidor. */
+export const addBot = (roomId: string, seat: Seat) =>
+  call<void>('add_bot', { p_room_id: roomId, p_seat: seat })
+export const removeBot = (roomId: string, seat: Seat) =>
+  call<void>('remove_bot', { p_room_id: roomId, p_seat: seat })
+
 // --- cola y parejas ---------------------------------------------------------
 export const requestTurn = (roomId: string) => call<void>('request_turn', { p_room_id: roomId })
 export const pairWith = (roomId: string, partnerId: string) =>

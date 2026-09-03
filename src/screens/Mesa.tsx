@@ -466,7 +466,7 @@ export function Mesa() {
               <div key={p.seat} className={`${s.rival} ${active ? s.rivalActive : ''}`}>
                 <Avatar name={p.display_name} size={34} variant={isPartner ? 'gold' : 'neutral'} />
                 <span className={s.rivalName}>
-                  {p.display_name}{isPartner ? ' · pareja' : ''}
+                  {p.display_name}{p.is_bot ? ' · bot' : isPartner ? ' · pareja' : ''}
                 </span>
                 <span className={`${s.rivalMeta} ${active ? s.rivalMetaActive : ''} ${caido ? s.rivalOff : ''}`}>
                   {caido ? 'sin señal' : `${p.tiles_left} fichas`}

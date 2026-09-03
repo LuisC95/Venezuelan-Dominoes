@@ -48,6 +48,7 @@ export type SeatInfo = {
   profile_id: string
   display_name: string | null
   avatar_url: string | null
+  is_bot: boolean
   team_index: TeamIndex
   tiles_left: number
   connected: boolean
@@ -117,6 +118,7 @@ export type RoomMember = {
   profile_id: string
   display_name: string
   avatar_url: string | null
+  is_bot: boolean
   role: 'player' | 'observer'
   seat: Seat | null
   team_id: string | null

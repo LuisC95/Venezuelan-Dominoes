@@ -116,4 +116,10 @@
 .bannerBtns { display: flex; gap: 8px; margin-top: 4px; }
 .bannerBtns > .ghost { flex: 1; min-width: 0; padding: 11px 8px; font-size: 11px; }
 
+.botTag {
+  display: block; margin-top: 3px;
+  font-weight: 600; font-size: 8px; line-height: 1;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--blue-soft);
+}
+
 .error { color: var(--lose); font-size: 13px; line-height: 1.6; text-align: center; }

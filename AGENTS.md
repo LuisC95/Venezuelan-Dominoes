@@ -25,6 +25,7 @@ cosas que costaron trabajo.
 | 9 | Chat y emotes en pantalla | ✅ verificada |
 | 10 | Historial y estadísticas (pantalla de perfil) | ✅ verificada |
 | 11 | Prueba con el grupo de 8 y ajustes | ⬜ |
+| — | Bots para rellenar puestos vacíos (fuera del plan) | ✅ verificada |
 
 Solo queda la etapa 11: probarlo con el grupo. El motor no necesita nada nuevo.
 
@@ -193,11 +194,17 @@ Ejecutables por `authenticated`:
 | `get_game_state` / `get_room_state` / `get_profile_history` | miembros | lectura |
 | `send_message(room_id, body, kind)` | miembros | chat y emotes |
 | `get_messages(room_id, limit)` | miembros | los últimos N mensajes de la sala |
+| `add_bot(room_id, seat)` / `remove_bot(room_id, seat)` | anfitrión | rellenar puestos vacíos |
 
 **Internas, sin `EXECUTE` para nadie** (solo las llama el motor por dentro):
 `deal_hand`, `resolve_hand`, `advance_turn`, `ensure_team`, `bump_player_stats`,
 `gen_room_code`, `notify_room`, `notify_match`, `on_hand_finished`,
-`on_match_finished`.
+`on_match_finished`, `apply_play`, `bot_elige`, `play_bots`, `puntas_tras`,
+`profiles_humano_con_sesion`.
+
+`smoke-bots.mjs` comprueba que las cuatro del bot siguen cerradas, **llamándolas
+con sus argumentos de verdad**: con argumentos inventados PostgREST responde "no
+existe esa función" y el check pasaría aunque estuvieran abiertas.
 
 Formato de ficha: texto `"mayor-menor"`, ej. `"6-4"`, `"3-3"`.
 Lados: `'l'` (izquierda) / `'r'` (derecha).
@@ -240,6 +247,8 @@ npx tsc -b           # typecheck
 node scripts/smoke.mjs        # sala, cola, RLS, trampas, una mano completa
 node scripts/smoke-match.mjs  # partida entera a 100 + rey de la cancha + estadísticas
 node scripts/smoke-void.mjs   # anular mano por desconexión (tarda ~80s a propósito)
+node scripts/smoke-bots.mjs   # bots: sentarlos, que jueguen solos, que no se puedan trampear
+node scripts/bench-bots.mjs   # torneo contra juego al azar — la vara para tocar los pesos
 ```
 
 ### Pruebas de UI (jsdom, porque no hay navegador)
@@ -254,6 +263,7 @@ node scripts/ui-reconexion.mjs # overlay de reconexión y anular mano trabada
 node scripts/ui-chat.mjs      # emotes, chat en vivo y freno del servidor
 node scripts/ui-perfil.mjs    # historial, estadísticas y pareja frecuente
 node scripts/ui-ajuste.mjs    # que las fichas quepan sin scroll, jugada a jugada
+node scripts/ui-bots.mjs      # rellenar la mesa con bots desde el lobby
 ```
 
 `ui-cola.mjs` levanta **dos** jsdom a la vez (Rafa juega, Gaby mira desde la
@@ -487,6 +497,70 @@ Lo que queda fuera del arnés: jsdom no hace layout, así que la prueba finge la
 medida y comprueba los px que la app decidió. La fidelidad visual de verdad
 —colores, sombras, cómo se ve en la mano— sigue necesitando abrirlo en un
 teléfono (`npm run dev` y entrar por la LAN).
+
+---
+
+## Bots (fuera del plan, ya hechos)
+
+Rellenan puestos vacíos: **máximo dos por mesa**, lo impone `add_bot`, no la UI.
+Son cuatro perfiles fijos (La Máquina, El Compa, Robotico, La Doña) sembrados
+por migración.
+
+**Viven dentro del motor.** `play_bots` se llama al final de `play_tile` y de
+`deal_hand`, y juega mientras el turno caiga en un bot. No hay cron ni proceso
+aparte, y el aviso por Realtime sale igual que con un humano. Como efecto
+secundario el bot juega *instantáneamente*: si algún día molesta, meterle un
+segundo de "pensar" ya pide `pg_cron` o simularlo en el cliente.
+
+Para que el bot pudiera jugar sin fingir una sesión se partió `play_tile` en
+dos: los controles de quién eres se quedaron arriba y el resto es `apply_play`,
+que **no valida permisos** — quien la llame es responsable de eso.
+
+### La línea que no se cruza
+
+`bot_elige` corre dentro del motor, así que tiene acceso a `hand_tiles`
+completo: a las fichas de los cuatro. Lo que protege a los humanos —RLS y
+`auth.uid()`— no lo limita a él. Mira **solo** sus propias fichas
+(`ht.seat = p_seat`), el tablero y `hand_moves`, que es información pública.
+Un bot tramposo se ve exactamente igual que uno bueno hasta que alguien nota
+que siempre adivina; si tocas esa función, esa es la línea.
+
+### Cómo juega
+
+Puntúa cada (ficha, lado) legal y se queda con la mejor. Lo que más pesa:
+
+- **Los pases son certeza, no cálculo.** Quien pasó con puntas 3 y 5 no tiene
+  ningún 3 ni ningún 5, y eso vale el resto de la mano. Para poder saberlo,
+  `hand_moves` guarda ahora `left_end`/`right_end` **del momento de la jugada**.
+- Ahogar a un rival (dejarle dos puntas que ya demostró no tener) es lo más
+  rentable; ahogar a tu propia pareja se castiga más de lo que se premia lo
+  anterior.
+- Dejar puntas de las que uno tiene muchas, soltar dobles temprano, y a igualdad
+  de todo descargar lo pesado, que es lo que se paga en tranca.
+
+Los pesos están con nombre al principio de `bot_elige`. **No los muevas a ojo:**
+`bench-bots.mjs` juega un torneo contra juego al azar y dice si sirvió. La
+referencia actual es **79% de manos y 328 a 95 en puntos sobre 24 manos**.
+
+### Integraciones que no se ven venir
+
+- Un bot **no late ni aparece en Presence**, así que sin excepciones la mesa lo
+  daría por caído a los 30s y al minuto ofrecería anular la mano por culpa de
+  alguien que está perfectamente. Están puestas en tres sitios:
+  `get_game_state`, `get_room_state` y `hacerSinSeñal` en el cliente. Y
+  `void_hand` se niega en seco si el de turno es un bot.
+- **No entran a la cola.** Al terminar la partida, si hay una pareja de verdad
+  esperando, los bots que pierden se van de la sala (`next_match`). Si no había
+  nadie, vuelven a entrar ellos.
+- **No cuentan como pareja frecuente** en el perfil, aunque el historial sí
+  sigue nombrándolos: esas partidas se jugaron.
+
+### Identidad
+
+`profiles.id` era FK a `auth.users` y un bot no tiene sesión. La FK se cambió
+por un trigger que exige lo mismo **solo para humanos**. Se perdió el
+`on delete cascade` de auth.users, que en la práctica no cambia nada porque
+AGENTS.md ya decía que no se borran usuarios.
 
 ---
 
