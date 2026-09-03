@@ -78,7 +78,7 @@ if (asientoBot) {
 r.head('Los bots juegan solos')
 r.check('se puede arrancar la partida', await pulsar(/^Iniciar partida$/, 'iniciar'))
 r.check('Rafa entra a la mesa', await until('la mesa', () => /Mesa limpia|Puntas/.test(text())))
-r.check('los rivales bot se ven marcados', /· bot/.test(text()))
+r.check('los rivales bot se ven marcados', /bot/i.test(text()))
 
 const matchId = (await chuo.sb.rpc('get_room_state', { p_room_id: sala.id })).data.current_match_id
 const leer = async () => (await chuo.sb.rpc('get_game_state', { p_match_id: matchId })).data
@@ -126,16 +126,16 @@ r.check('los bots jugaron sin que nadie los llame', deLosBots > 0, `${deLosBots}
 // Chuo sí aparece sin señal, y está bien: en la prueba juega por RPC, no late
 // ni se suscribe al canal. Lo que se comprueba aquí es que a los BOTS no les
 // pase lo mismo, que es lo que rompería la mesa.
-// OJO: [class*="rival"] casa también con el contenedor .rivals, que lleva
-// dentro los tres chips. El contenedor es el único cuya clase dice "rivals".
-const chipsBot = [...(doc.querySelector('div[class*="rivals"]')?.children ?? [])]
-  .filter((c) => /· bot/.test(c.textContent ?? ''))
+// Cada jugador está en su lado de la mesa y ya no hay contenedor .rivals, así
+// que la clase "rival" identifica exactamente a los chips.
+const chipsBot = [...doc.querySelectorAll('div[class*="rival"]')]
+  .filter((c) => /bot/.test(c.textContent ?? ''))
 r.check('los dos bots están en la mesa', chipsBot.length === 2, `${chipsBot.length} chips`)
 r.check('ningún bot aparece sin señal',
   chipsBot.every((c) => !/sin señal/i.test(c.textContent ?? '')),
   chipsBot.map((c) => c.textContent).join(' | '))
 r.check('a los bots se les ven las fichas que les quedan',
-  chipsBot.every((c) => /\d+ fichas/.test(c.textContent ?? '')))
+  chipsBot.every((c) => /\d/.test(c.textContent ?? '')))
 r.check('nunca ofrece anular la mano', !byText('button', /Anular la mano/))
 r.check('la mesa sigue viva', /Puntas|Tu turno|Juega/.test(text()))
 

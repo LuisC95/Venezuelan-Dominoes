@@ -12,7 +12,8 @@ import { useLatido } from '../hooks/useLatido'
 import { useTamano } from '../hooks/useTamano'
 import { useMensajes } from '../hooks/useMensajes'
 import {
-  hacerSinSeñal, otherSeats, segundosSinSeñal, tamanoMano, tamanoTablero, teamNames, trailingPasses,
+  filasDeCadena, hacerSinSeñal, otherSeats, segundosSinSeñal, tamanoMano, tamanoTablero,
+  teamNames, trailingPasses,
 } from '../game/view'
 import type { GameState, HandEndType, SeatInfo, TeamIndex } from '../game/state'
 import s from './Mesa.module.css'
@@ -157,6 +158,36 @@ function FichasReveladas({ state }: { state: GameState }) {
  * decidir aquí, solo tranquilizar — la mano y el turno viven en el servidor, así
  * que volver a tener señal es un fetch y nada más.
  */
+/**
+ * Uno de los otros tres, en su lado de la mesa. `estrecho` es para los de los
+ * costados, que solo tienen unos 50px: ahí el nombre va debajo y recortado.
+ */
+function Jugador({
+  p,
+  esPareja,
+  caido,
+  estrecho,
+}: {
+  p: SeatInfo
+  esPareja: boolean
+  caido: boolean
+  estrecho: boolean
+}) {
+  const etiqueta = p.is_bot ? ' · bot' : esPareja ? ' · pareja' : ''
+  return (
+    <div className={`${s.rival} ${estrecho ? s.rivalLado : ''} ${p.is_turn ? s.rivalActive : ''}`}>
+      <Avatar name={p.display_name} size={estrecho ? 30 : 34} variant={esPareja ? 'gold' : 'neutral'} />
+      <span className={s.rivalName}>{estrecho ? p.display_name : `${p.display_name}${etiqueta}`}</span>
+      {/* En el chip estrecho no cabe "· bot" al lado del nombre, pero saber
+          quién es máquina importa: va como etiqueta propia. */}
+      {estrecho && p.is_bot && <span className={s.rivalBot}>bot</span>}
+      <span className={`${s.rivalMeta} ${p.is_turn ? s.rivalMetaActive : ''} ${caido ? s.rivalOff : ''}`}>
+        {caido ? 'sin señal' : estrecho ? p.tiles_left : `${p.tiles_left} fichas`}
+      </span>
+    </div>
+  )
+}
+
 function Reconectando({ onReintentar }: { onReintentar: () => void }) {
   return (
     <div className={s.overlay}>
@@ -340,18 +371,28 @@ export function Mesa() {
   const scores = scoreCards(state)
 
   const meRow = me.seat !== null ? seats[me.seat] : null
-  const others = otherSeats(me.seat, seats)
+  // De izquierda a derecha vistos desde tu silla: el que juega después de ti
+  // queda a tu izquierda (el turno gira en sentido horario), tu pareja al
+  // frente, y el que juega antes a tu derecha.
+  const [aLaIzquierda, pareja, aLaDerecha] = otherSeats(me.seat, seats)
   const passLine = trailingPasses(state.recent_moves, seats)
 
   // El tamaño sale de lo que mide el tablero, no de una fórmula por número de
   // fichas: es la única forma de garantizar que la cadena entera se vea sin
   // scroll cuando el hueco cambia (se abre el chat, entra un aviso, gira el
   // teléfono). Mientras no haya medida se usa la estimación de siempre.
+  const dobles = board.map((t) => isDouble(t.tile))
+  const anchoUtil = cajaTablero.ancho - AIRE_TABLERO * 2
   const tileSize = tamanoTablero(
-    board.map((t) => isDouble(t.tile)),
-    { ancho: cajaTablero.ancho - AIRE_TABLERO * 2, alto: cajaTablero.alto - AIRE_TABLERO * 2 },
+    dobles,
+    { ancho: anchoUtil, alto: cajaTablero.alto - AIRE_TABLERO * 2 },
     HUECO_TABLERO,
   )
+  // La cadena se parte en líneas y cada una se pinta aparte para poder
+  // alternarles el sentido: si todas fueran de izquierda a derecha, la ficha que
+  // sigue a la última de una fila aparecería al otro extremo de la pantalla y la
+  // seguidilla se pierde. Serpenteando, la continuación queda justo debajo.
+  const filas = filasDeCadena(dobles, tileSize, Math.max(1, anchoUtil), HUECO_TABLERO)
   const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, FICHA_MANO_MAX)
 
   const sinSeñal = hacerSinSeñal(presentes, me.profile_id)
@@ -457,25 +498,6 @@ export function Mesa() {
       </div>
 
       <div className={s.middle}>
-        <div className={s.rivals}>
-          {others.map((p) => {
-            const active = p.is_turn
-            const isPartner = me.seat !== null && p.team_index === me.team_index
-            const caido = sinSeñal(p)
-            return (
-              <div key={p.seat} className={`${s.rival} ${active ? s.rivalActive : ''}`}>
-                <Avatar name={p.display_name} size={34} variant={isPartner ? 'gold' : 'neutral'} />
-                <span className={s.rivalName}>
-                  {p.display_name}{p.is_bot ? ' · bot' : isPartner ? ' · pareja' : ''}
-                </span>
-                <span className={`${s.rivalMeta} ${active ? s.rivalMetaActive : ''} ${caido ? s.rivalOff : ''}`}>
-                  {caido ? 'sin señal' : `${p.tiles_left} fichas`}
-                </span>
-              </div>
-            )
-          })}
-        </div>
-
         {esperandoA && espiando && (
           <EsperandoJugador
             jugador={esperandoA}
@@ -489,20 +511,41 @@ export function Mesa() {
           />
         )}
 
-        <div className={s.felt} ref={medirTablero}>
+        <div className={s.arriba}>
+          <Jugador p={pareja} esPareja caido={sinSeñal(pareja)} estrecho={false} />
+        </div>
+
+        <div className={s.centro}>
+          <Jugador p={aLaIzquierda} esPareja={false} caido={sinSeñal(aLaIzquierda)} estrecho />
+
+          <div className={s.felt} ref={medirTablero}>
           {board.length === 0 ? (
             <div className={s.feltEmpty}>Mesa limpia</div>
           ) : (
-            <div className={s.board}>
+            <div className={s.board} style={{ padding: AIRE_TABLERO }}>
               <div className={s.boardInner} style={{ gap: HUECO_TABLERO }}>
-                {board.map((t) => (
-                  <Ficha
-                    key={t.position}
-                    top={t.a}
-                    bottom={t.b}
-                    size={tileSize}
-                    vertical={isDouble(t.tile)}
-                  />
+                {filas.map((fila, i) => (
+                  <div
+                    key={fila.desde}
+                    className={s.boardRow}
+                    // Las impares van al revés: se leen de derecha a izquierda.
+                    style={{ gap: HUECO_TABLERO, flexDirection: i % 2 ? 'row-reverse' : 'row' }}
+                  >
+                    {board.slice(fila.desde, fila.hasta + 1).map((t) => {
+                      const alReves = i % 2 === 1
+                      return (
+                        <Ficha
+                          key={t.position}
+                          // En una fila invertida la ficha también se espeja, o
+                          // los números dejarían de casar con el vecino.
+                          top={alReves ? t.b : t.a}
+                          bottom={alReves ? t.a : t.b}
+                          size={tileSize}
+                          vertical={isDouble(t.tile)}
+                        />
+                      )
+                    })}
+                  </div>
                 ))}
               </div>
             </div>
@@ -511,6 +554,9 @@ export function Mesa() {
             Puntas {hand.left_end === null ? '—' : `${hand.left_end} · ${hand.right_end}`}
           </div>
           {passLine && <div className={s.passLine}>{passLine}</div>}
+          </div>
+
+          <Jugador p={aLaDerecha} esPareja={false} caido={sinSeñal(aLaDerecha)} estrecho />
         </div>
 
         <Chat

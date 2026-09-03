@@ -37,38 +37,43 @@ export function medidaFicha(size: number, doble: boolean): { ancho: number; alto
   return doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto }
 }
 
+/** Una línea de la cadena: qué fichas lleva y cuánto ocupa. */
+export type FilaCadena = { desde: number; hasta: number; ancho: number; alto: number }
+
 /**
- * Simula el reparto en líneas de `flex-wrap` y devuelve el alto de cada una.
+ * Reparte la cadena en líneas, igual que haría `flex-wrap`.
+ *
  * Se simula en vez de estimarse porque los dobles miden distinto: contar
  * "fichas por fila" daría de más justo en las manos con muchos dobles, que son
- * las que peor caben.
+ * las que peor caben. Y como devuelve los índices, es también lo que usa la
+ * mesa para pintar cada línea por separado y hacerlas serpentear.
  */
-export function filasDeCadena(dobles: boolean[], size: number, ancho: number, gap: number): number[] {
-  const altos: number[] = []
-  let filaAncho = 0
-  let filaAlto = 0
-  let vacia = true
+export function filasDeCadena(dobles: boolean[], size: number, ancho: number, gap: number): FilaCadena[] {
+  const filas: FilaCadena[] = []
+  let fila: FilaCadena | null = null
 
-  for (const doble of dobles) {
-    const m = medidaFicha(size, doble)
-    if (!vacia && filaAncho + gap + m.ancho > ancho) {
-      altos.push(filaAlto)
-      filaAncho = m.ancho
-      filaAlto = m.alto
+  for (let i = 0; i < dobles.length; i++) {
+    const m = medidaFicha(size, dobles[i])
+    if (fila && fila.ancho + gap + m.ancho > ancho) {
+      filas.push(fila)
+      fila = null
+    }
+    if (!fila) {
+      fila = { desde: i, hasta: i, ancho: m.ancho, alto: m.alto }
     } else {
-      filaAncho = vacia ? m.ancho : filaAncho + gap + m.ancho
-      filaAlto = Math.max(filaAlto, m.alto)
-      vacia = false
+      fila.hasta = i
+      fila.ancho += gap + m.ancho
+      fila.alto = Math.max(fila.alto, m.alto)
     }
   }
-  if (!vacia) altos.push(filaAlto)
-  return altos
+  if (fila) filas.push(fila)
+  return filas
 }
 
 /** Alto total de la cadena, con los huecos entre filas. */
-export function altoDeCadena(altos: number[], gap: number): number {
-  if (altos.length === 0) return 0
-  return altos.reduce((a, b) => a + b, 0) + gap * (altos.length - 1)
+export function altoDeCadena(filas: FilaCadena[], gap: number): number {
+  if (filas.length === 0) return 0
+  return filas.reduce((a, f) => a + f.alto, 0) + gap * (filas.length - 1)
 }
 
 /**
@@ -86,8 +91,8 @@ export function tamanoTablero(dobles: boolean[], caja: Caja, gap: number): numbe
   for (let size = FICHA_MAX; size > FICHA_MIN; size--) {
     // Una ficha normal mide `size` de ancho: más ancha que la caja no cabe ni sola.
     if (size > caja.ancho) continue
-    const altos = filasDeCadena(dobles, size, caja.ancho, gap)
-    if (altoDeCadena(altos, gap) <= caja.alto) return size
+    const filas = filasDeCadena(dobles, size, caja.ancho, gap)
+    if (altoDeCadena(filas, gap) <= caja.alto) return size
   }
   return FICHA_MIN
 }

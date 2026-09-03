@@ -24,11 +24,15 @@ const AIRE_TABLERO = 10
 const HUECO_MANO = 8
 const AIRE_MANO = 3
 
-/** Cajas de felt plausibles: chico, grande, y con el chat abierto. */
+/*
+ * Cajas de paño plausibles. Ya no son el ancho de la pantalla: con un jugador a
+ * cada lado, el paño pierde unos 104px (dos chips de 46 más los huecos). En una
+ * pantalla de 320 quedan ~192; en una de 430, ~302.
+ */
 const CAJAS = [
-  { nombre: 'teléfono chico', ancho: 342, alto: 200 },
-  { nombre: 'teléfono grande', ancho: 406, alto: 300 },
-  { nombre: 'con el chat abierto', ancho: 342, alto: 110 },
+  { nombre: 'teléfono chico', ancho: 192, alto: 200 },
+  { nombre: 'teléfono grande', ancho: 302, alto: 300 },
+  { nombre: 'con el chat abierto', ancho: 192, alto: 110 },
 ]
 
 const app = await bootApp({ as: 'Rafa' })
@@ -60,33 +64,29 @@ function medirComo(el, ancho, alto) {
 
 const px = (v) => Number.parseFloat(String(v).replace('px', '')) || 0
 
-/** Las fichas del tablero, con los px que la app les puso. */
-function fichasDelTablero() {
+/**
+ * Las filas que la app pintó, con los px que le puso a cada ficha. Se leen del
+ * DOM en vez de volver a simular el reparto: así se comprueba lo que se ve, no
+ * una copia del cálculo.
+ */
+function filasDelTablero() {
   const inner = doc.querySelector('[class*="boardInner"]')
   if (!inner) return []
-  return [...inner.children].map((f) => ({ ancho: px(f.style.width), alto: px(f.style.height) }))
+  return [...inner.children].map((fila) => ({
+    invertida: fila.style.flexDirection === 'row-reverse',
+    fichas: [...fila.children].map((f) => ({ ancho: px(f.style.width), alto: px(f.style.height) })),
+  }))
 }
 
-/** Reparte en filas como flex-wrap y devuelve el ancho de cada una y el alto total. */
-function repartir(fichas, ancho, gap) {
-  const filas = []
-  let filaAncho = 0
-  let filaAlto = 0
-  let vacia = true
-  for (const f of fichas) {
-    if (!vacia && filaAncho + gap + f.ancho > ancho) {
-      filas.push({ ancho: filaAncho, alto: filaAlto })
-      filaAncho = f.ancho
-      filaAlto = f.alto
-    } else {
-      filaAncho = vacia ? f.ancho : filaAncho + gap + f.ancho
-      filaAlto = Math.max(filaAlto, f.alto)
-      vacia = false
-    }
-  }
-  if (!vacia) filas.push({ ancho: filaAncho, alto: filaAlto })
-  const alto = filas.reduce((a, f) => a + f.alto, 0) + gap * Math.max(0, filas.length - 1)
-  return { filas, alto }
+const fichasDelTablero = () => filasDelTablero().flatMap((f) => f.fichas)
+
+/** Lo que ocupa cada fila y el alto total, sumando huecos. */
+function medirFilas(filas, gap) {
+  const anchos = filas.map((f) =>
+    f.fichas.reduce((a, x) => a + x.ancho, 0) + gap * Math.max(0, f.fichas.length - 1))
+  const altos = filas.map((f) => Math.max(0, ...f.fichas.map((x) => x.alto)))
+  const alto = altos.reduce((a, b) => a + b, 0) + gap * Math.max(0, filas.length - 1)
+  return { anchos, alto }
 }
 
 // --- montar una partida ---------------------------------------------------
@@ -144,6 +144,10 @@ let guard = 0
 // bucle porque al terminar la mano la pantalla cambia y ya no hay tablero.
 let ladoMedioJuego = Infinity
 let fichasEntonces = 0
+// El peor caso de toda la corrida: la ficha más pequeña que llegó a pintarse.
+let ladoMinimo = Infinity
+let cajaMinima = ''
+let fichasMinimo = 0
 let siempreIguales = true
 
 while (st.hand.status === 'active' && guard++ < 200) {
@@ -175,19 +179,26 @@ while (st.hand.status === 'active' && guard++ < 200) {
 
   if (st.hand.status !== 'active') break
 
+  // Antes de medir, esperar a que la pantalla se haya enterado de la última
+  // jugada. Comparar el DOM contra lo que ya sabe el servidor sin esperar es la
+  // receta para fallos intermitentes que parecen bugs y no lo son.
+  await until('que el tablero muestre todas las fichas',
+    () => fichasDelTablero().length === st.board.length, 8000)
+
   // Con la cadena como esté ahora mismo, ¿cabe en cada una de las cajas?
   for (const caja of CAJAS) {
     medirComo(felt, caja.ancho, caja.alto)
     remedir()
     await wait(60)
 
-    const fichas = fichasDelTablero()
+    const filas = filasDelTablero()
+    const fichas = filas.flatMap((f) => f.fichas)
     if (fichas.length === 0) continue
     masFichas = Math.max(masFichas, fichas.length)
 
     const disponible = { ancho: caja.ancho - AIRE_TABLERO * 2, alto: caja.alto - AIRE_TABLERO * 2 }
-    const { filas, alto } = repartir(fichas, disponible.ancho, HUECO_TABLERO)
-    const masAncha = Math.max(...filas.map((f) => f.ancho))
+    const { anchos, alto } = medirFilas(filas, HUECO_TABLERO)
+    const masAncha = Math.max(...anchos)
 
     if (masAncha > disponible.ancho || alto > disponible.alto) {
       r.check(`cabe con ${fichas.length} fichas en ${caja.nombre}`, false,
@@ -196,8 +207,27 @@ while (st.hand.status === 'active' && guard++ < 200) {
       break
     }
 
+    // La cadena tiene que serpentear: si dos filas seguidas van en el mismo
+    // sentido, la continuación aparece al otro extremo y se pierde el hilo.
+    if (filas.some((f, k) => f.invertida !== (k % 2 === 1))) {
+      r.check('las filas alternan de sentido', false, filas.map((f) => (f.invertida ? '←' : '→')).join(''))
+      revisiones = -1
+      break
+    }
+    if (fichas.length !== st.board.length) {
+      r.check('las filas llevan todas las fichas y ninguna de más', false,
+        `${fichas.length} pintadas / ${st.board.length} en el servidor`)
+      revisiones = -1
+      break
+    }
+
     const lados = fichas.map((f) => Math.max(f.ancho, f.alto))
     if (new Set(lados).size !== 1) siempreIguales = false
+    if (lados[0] < ladoMinimo) {
+      ladoMinimo = lados[0]
+      cajaMinima = caja.nombre
+      fichasMinimo = fichas.length
+    }
     // El peor caso de media partida en la caja holgada: es donde la ficha tiene
     // que seguir leyéndose. Con una sola ficha en la mesa no prueba nada.
     if (caja.nombre === 'teléfono grande' && fichas.length >= 8 && fichas.length <= 14
@@ -212,8 +242,11 @@ while (st.hand.status === 'active' && guard++ < 200) {
   if (revisiones < 0) break
 }
 
-r.check('la cadena cupo sin scroll en todas las jugadas y todas las cajas',
+r.check('la cadena cupo, serpenteó y no perdió fichas en ninguna jugada ni caja',
   revisiones > 0, `${revisiones} comprobaciones, hasta ${masFichas} fichas, holgura mínima ${peorHolgura}px`)
+
+console.log(`  la más pequeña que se llegó a pintar: ${ladoMinimo}px de lado largo` +
+  ` (${fichasMinimo} fichas, ${cajaMinima})`)
 
 r.head('Sin encoger de más')
 r.check('a media partida la ficha sigue siendo legible', ladoMedioJuego >= 36,

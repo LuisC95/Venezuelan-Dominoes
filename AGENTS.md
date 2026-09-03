@@ -493,6 +493,34 @@ Tres cosas que hay que respetar si se toca esto:
    corto como `round(size / 2)`: un lado largo impar se redondea hacia arriba y
    cada ficha se pasa medio píxel — con siete en la mano, 3px de scroll.
 
+### La cadena serpentea
+
+Que quepa no basta: con `flex-wrap` normal, la ficha que sigue a la última de
+una línea aparecía al otro extremo de la pantalla y **se perdía la seguidilla**
+(lo reportó el usuario jugando). Por eso el tablero ya no es un `flex-wrap`:
+`filasDeCadena` devuelve los índices de cada línea y la mesa las pinta una por
+una, **alternando el sentido** (`row-reverse` en las impares). Así la
+continuación queda justo debajo.
+
+Dos detalles que van juntos y se rompen por separado:
+
+- En una fila invertida **la ficha también se espeja** (`top`/`bottom` al revés),
+  o los números dejan de casar con el vecino.
+- Cada fila se empaqueta con `justify-content: flex-start`, que en una fila
+  invertida es la derecha. Centrarlas descolocaría el punto de unión.
+
+### Cada quien en su lado
+
+Tu pareja al frente y los dos rivales a los costados, no los tres en fila arriba
+como hacía el prototipo. El turno gira en sentido horario, así que **el que
+juega después de ti queda a tu izquierda**.
+
+Cuesta ancho de paño: dos chips de 46px más los huecos son ~104px menos para las
+fichas. En el peor caso medido —teléfono chico, chat abierto y 21 fichas— la
+ficha baja a 23px de lado largo, casi el suelo de `FICHA_MIN`. Si algún día
+estorba, los dos botones son estrechar más `.rivalLado` o bajar el alto del
+historial del chat, que es lo que de verdad aplasta el tablero.
+
 Lo que queda fuera del arnés: jsdom no hace layout, así que la prueba finge la
 medida y comprueba los px que la app decidió. La fidelidad visual de verdad
 —colores, sombras, cómo se ve en la mano— sigue necesitando abrirlo en un

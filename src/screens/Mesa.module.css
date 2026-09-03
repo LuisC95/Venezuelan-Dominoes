@@ -43,13 +43,34 @@
 
 /* --- rivales y pareja --- */
 .middle { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 0; gap: 10px; }
-.rivals { display: flex; align-items: center; justify-content: center; gap: 8px; }
+/*
+ * Cada quien en su lado, como en una mesa de verdad: tu pareja al frente y los
+ * dos rivales a los costados. Los de los lados van estrechos a propósito — lo
+ * que le quiten de ancho al paño se lo quitan a las fichas.
+ */
+.arriba { flex: 0 0 auto; display: flex; justify-content: center; }
+/* stretch, no center: el paño no tiene alto propio (su contenido es absoluto),
+   así que si no se estira se queda en nada. Los chips sí se centran. */
+.centro { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: 6px; }
+.centro > .felt { flex: 1; min-width: 0; }
+
 .rival {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
   padding: 8px 10px; border-radius: var(--r-lg);
   background: var(--surface-soft); border: 1px solid rgba(242, 234, 216, .08);
   min-width: 74px;
 }
+.rivalLado {
+  flex: 0 0 auto; align-self: center;
+  width: 46px; min-width: 0;
+  padding: 7px 3px; gap: 4px;
+}
+.rivalLado .rivalName { max-width: 40px; font-size: 10px; }
+.rivalBot {
+  font-weight: 600; font-size: 7px; line-height: 1;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--blue-soft);
+}
+.rivalLado .rivalMeta { font-family: var(--font-display); font-size: 15px; letter-spacing: 0; }
 .rivalActive { background: rgba(227, 178, 60, .12); border-color: var(--gold); }
 .rivalName {
   font-weight: 500; font-size: 11px; line-height: 1; color: var(--ivory-soft);
@@ -79,9 +100,16 @@
   overflow: hidden;
 }
 .boardInner {
-  display: flex; flex-wrap: wrap;
-  align-items: center; justify-content: center; max-width: 100%;
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: stretch; justify-content: center;
 }
+/*
+ * Cada línea se empaqueta contra su lado de arranque (flex-start, que en una
+ * fila invertida es la derecha). Así la última ficha de una línea y la primera
+ * de la siguiente quedan una encima de otra y la cadena se sigue leyendo.
+ */
+.boardRow { display: flex; align-items: center; justify-content: flex-start; }
 .feltEmpty {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
