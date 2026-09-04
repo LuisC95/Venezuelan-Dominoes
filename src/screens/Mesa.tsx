@@ -69,16 +69,16 @@ const AIRE_MANO = 3
 /** Tu mano no crece más que esto aunque sobre sitio. */
 const FICHA_MANO_MAX = 104
 /*
- * Lo que se le quita al paño por cada lado, ahora que los jugadores y el chat
- * van ENCIMA. Los de los costados salen gratis: la cadena corre por el lado
- * largo —el vertical— y el ancho no decide el tamaño de la ficha. Los de arriba
- * y abajo sí cuestan, y por eso son lo más justo posible.
+ * Lo que se le quita al paño para los jugadores y el chat, que van ENCIMA.
+ *
+ * **Se miden, no se estiman.** La primera versión llevaba tres números a ojo y
+ * en la primera foto en un Chromium de verdad la cola de la cadena se metía
+ * debajo de la fila de emotes: el bloque del chat medía el triple de lo que yo
+ * había supuesto. Estos valores son solo el respaldo para cuando todavía no hay
+ * medida (primer render, y jsdom, que no hace layout).
  */
-/** El chip de tu pareja, arriba al centro. */
 const MARGEN_ARRIBA = 62
-/** La fila de emotes del chat, abajo. */
 const MARGEN_ABAJO = 44
-/** Los chips de los dos rivales, a los costados. */
 const MARGEN_LADOS = 56
 
 /* Referencias estables: van en las dependencias de los hooks de la mano y del
@@ -656,6 +656,10 @@ export function Mesa() {
   const [espiando, setEspiando] = useState(false)
   const [medirTablero, cajaTablero] = useTamano<HTMLDivElement>()
   const [medirMano, cajaMano] = useTamano<HTMLDivElement>()
+  // Lo que ocupan de verdad los chips y el chat sobre el paño.
+  const [medirPareja, cajaPareja] = useTamano<HTMLDivElement>()
+  const [medirRival, cajaRival] = useTamano<HTMLDivElement>()
+  const [medirChat, cajaChat] = useTamano<HTMLDivElement>()
 
   const cadena = useColaDeJugadas(
     state?.hand?.id ?? null, state?.board ?? SIN_FICHAS, state?.recent_moves ?? SIN_JUGADAS,
@@ -760,8 +764,10 @@ export function Mesa() {
    * pasa por debajo de una cara.
    */
   const cajaCadena = {
-    ancho: Math.max(1, cajaTablero.ancho - AIRE_TABLERO * 2 - MARGEN_LADOS * 2),
-    alto: Math.max(1, cajaTablero.alto - AIRE_TABLERO * 2 - MARGEN_ARRIBA - MARGEN_ABAJO),
+    ancho: Math.max(1, cajaTablero.ancho - AIRE_TABLERO * 2
+      - (cajaRival.ancho || MARGEN_LADOS) * 2),
+    alto: Math.max(1, cajaTablero.alto - AIRE_TABLERO * 2
+      - (cajaPareja.alto || MARGEN_ARRIBA) - (cajaChat.alto || MARGEN_ABAJO)),
   }
   const tileSize = tamanoTablero(dobles, iSalida, cajaCadena, HUECO_TABLERO)
   /*
@@ -927,7 +933,7 @@ export function Mesa() {
             />
           )}
 
-          <div className={s.arriba}>
+          <div className={s.arriba} ref={medirPareja}>
             <Jugador
               p={pareja}
               esPareja
@@ -938,7 +944,7 @@ export function Mesa() {
               desfase={desfase}
             />
           </div>
-          <div className={`${s.lado} ${s.ladoIzq}`}>
+          <div className={`${s.lado} ${s.ladoIzq}`} ref={medirRival}>
             <Jugador
               p={aLaIzquierda}
               esPareja={false}
@@ -961,12 +967,14 @@ export function Mesa() {
             />
           </div>
 
-          <div className={s.ends}>
-            Puntas {hand.left_end === null ? '—' : `${hand.left_end} · ${hand.right_end}`}
+          <div className={s.avisos}>
+            <div className={s.ends}>
+              Puntas {hand.left_end === null ? '—' : `${hand.left_end} · ${hand.right_end}`}
+            </div>
+            {passLine && <div className={s.passLine}>{passLine}</div>}
           </div>
-          {passLine && <div className={s.passLine}>{passLine}</div>}
 
-          <div className={s.chatFlotante}>
+          <div className={s.chatFlotante} ref={medirChat}>
             <Chat
               mensajes={chat.mensajes}
               desfase={chat.desfase}

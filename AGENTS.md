@@ -308,12 +308,21 @@ Seis cosas que costaron tiempo. No las repitas.
    `node scripts/seed-players.mjs` (reintenta con paciencia). Se puede subir el
    límite en Authentication → Rate Limits.
 
-3. **Chromium no arranca en esta máquina**: faltan `libnspr4`, `libnss3`,
-   `libnssutil3` y `libasound.so.2`, y no hay sudo. De ahí el arnés de jsdom.
-   Si algún día se instalan (`sudo apt install libnspr4 libnss3 libasound2t64`),
-   Playwright ya está en la caché de `~/.cache/ms-playwright` y se pueden tomar
-   screenshots de verdad — que es lo que falta para verificar **fidelidad
-   visual** contra el prototipo.
+3. **Chromium YA ARRANCA.** Durante mucho tiempo no: faltaban `libnspr4`,
+   `libnss3`, `libnssutil3` y `libasound.so.2`, y de ahí salió todo el arnés de
+   jsdom. **Las cuatro están instaladas**, así que
+   `~/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome` corre y
+   `scripts/foto.mjs` (`npm run ui:foto`) saca fotos de la mesa en un teléfono
+   emulado de 390×844 a densidad 3.
+
+   No usa Playwright —no está instalado— sino el protocolo de DevTools a pelo
+   por el WebSocket que trae Node 24. **Úsalo siempre que toques el acomodo de
+   la mesa.** En la primera foto aparecieron dos choques y un error de bulto que
+   jsdom no podía ver, porque jsdom **no hace layout**: te dice que un elemento
+   lleva `width: 28px` en su atributo `style`, no si tapa a otro.
+
+   El arnés de jsdom sigue siendo el que comprueba lógica y medidas; el de fotos
+   es el que comprueba que se vea.
 
 4. **jsdom no ejecuta `<script type="module">`** ni trae `fetch`/`WebSocket`.
    `bootApp()` evalúa el bundle a mano (neutralizando `import.meta`) e inyecta
@@ -527,8 +536,15 @@ Ahora:
 
 - **El paño se queda con la pantalla.** Los tres jugadores van encima, pegados a
   sus bordes, y el chat flota en una esquina. La caja donde se tiende la cadena
-  se mete hacia dentro lo que ocupan (`MARGEN_ARRIBA`, `MARGEN_ABAJO`,
-  `MARGEN_LADOS` en `Mesa.tsx`).
+  se mete hacia dentro lo que ocupan, **medido con `useTamano`, no estimado**:
+  la primera versión llevaba tres constantes a ojo y en la primera foto de
+  verdad la cola de la cadena se metía debajo de la fila de emotes, porque el
+  bloque del chat medía el triple de lo supuesto. `MARGEN_ARRIBA`,
+  `MARGEN_ABAJO` y `MARGEN_LADOS` son solo el respaldo de cuando todavía no hay
+  medida (primer render, y jsdom).
+- **Las burbujas del chat no cuentan para ese alto**: van en absoluto sobre la
+  fila de emotes. Si contaran, la cadena se reacomodaría entera cada vez que
+  alguien suelta un emote.
 - **La cadena corre por el lado largo del paño**, que en un teléfono de pie es el
   vertical. El eje útil pasa de ~226 a ~420px. Girar el teléfono no necesita
   código aparte: el eje se elige midiendo.

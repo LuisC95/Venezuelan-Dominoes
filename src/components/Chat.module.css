@@ -4,6 +4,17 @@
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  /*
+   * Sobre el paño, lo único que ocupa sitio es la fila de emotes: las burbujas y
+   * el historial se apilan ENCIMA, en absoluto. Si contaran para el alto, la
+   * cadena se reacomodaría entera cada vez que alguien suelta un emote.
+   */
+  position: relative;
+}
+.chat > .burbujas,
+.chat > .historial {
+  position: absolute; left: 0; right: 0; bottom: 100%;
+  margin-bottom: 8px;
 }
 
 /* --- burbujas que se apagan solas --- */
