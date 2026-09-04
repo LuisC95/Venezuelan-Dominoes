@@ -34,8 +34,12 @@ export function boardTileSize(count: number): number {
 
 export type Caja = { ancho: number; alto: number }
 
-/** Por debajo de esto la ficha deja de leerse; por encima, no crece más. */
-export const FICHA_MIN = 22
+/**
+ * Por debajo de esto la ficha deja de leerse en la mano —lo dijo el usuario
+ * jugando, con las de 23px—; por encima, no crece más. Al llegar a este suelo la
+ * cadena deja de encoger y empieza a doblar.
+ */
+export const FICHA_MIN = 28
 export const FICHA_MAX = 64
 
 /**
@@ -46,6 +50,20 @@ export function medidaFicha(size: number, doble: boolean): { ancho: number; alto
   const corto = Math.round(size / 2)
   return doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto }
 }
+
+/** Por dónde avanza la cadena en cada momento. */
+export type Sentido = 'arriba' | 'abajo' | 'izquierda' | 'derecha'
+
+const DIR: Record<Sentido, { dx: number; dy: number }> = {
+  arriba: { dx: 0, dy: -1 },
+  abajo: { dx: 0, dy: 1 },
+  izquierda: { dx: -1, dy: 0 },
+  derecha: { dx: 1, dy: 0 },
+}
+const OPUESTO: Record<Sentido, Sentido> = {
+  arriba: 'abajo', abajo: 'arriba', izquierda: 'derecha', derecha: 'izquierda',
+}
+const enVertical = (s: Sentido) => s === 'arriba' || s === 'abajo'
 
 /** Dónde y cómo va pintada una ficha del tablero. */
 export type Pieza = {
@@ -58,130 +76,263 @@ export type Pieza = {
   alto: number
   /** Si la `Ficha` se pinta parada (lado largo vertical). */
   vertical: boolean
-  /** Tramo que va hacia la izquierda: los pips van intercambiados. */
+  /** Pips intercambiados: la cadena entra por el lado de abajo o de la derecha. */
   espejo: boolean
-  /** La ficha del giro, girada 90° respecto a su tramo. */
-  codo: boolean
-  fila: number
-  /** +1 el tramo avanza hacia la derecha, -1 hacia la izquierda. */
-  sentido: 1 | -1
+  /** Aquí la cadena dobló. */
+  esquina: boolean
+  /** Cada recta entre dos giros. */
+  tramo: number
+  sentido: Sentido
 }
 
 export type Acomodo = { piezas: Pieza[]; ancho: number; alto: number }
 
 /**
- * Reparte la cadena por el paño, serpenteando, y devuelve la posición exacta de
- * cada ficha.
+ * Lo que una ficha AVANZA la cadena y lo que ocupa DE TRAVÉS.
  *
- * Antes esto eran filas de `flex-wrap` alternando el sentido, y el giro **no
- * cuadraba**: el reparto es codicioso, así que a cada fila le sobra un trozo
- * distinto, y la fila par pegaba a la izquierda mientras la impar pegaba a la
- * derecha. El punto de unión se corría hasta un ancho de ficha y la seguidilla
- * se perdía — es lo que el usuario reportó jugando.
- *
- * Aquí el giro lo hace una ficha **puesta de canto**, como en una mesa de
- * verdad: la última de la fila se gira 90° y la fila siguiente arranca pegada a
- * su borde exterior. Así la unión cuadra por construcción, no por suerte.
+ * Un doble va cruzado —así se pone en la mesa de verdad—, así que avanza poco y
+ * se ensancha; una normal se acuesta a lo largo de la línea y hace lo contrario.
  */
-export function acomodarCadena(dobles: boolean[], size: number, ancho: number, gap: number): Acomodo {
+function medidas(size: number, doble: boolean) {
   const corto = Math.round(size / 2)
-  // En el tramo, la normal va acostada y el doble de canto. En el codo, al revés.
-  const enTramo = (doble: boolean) => (doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto })
-  const enCodo = (doble: boolean) => (doble ? { ancho: size, alto: corto } : { ancho: corto, alto: size })
+  return doble ? { avance: corto, cruce: size } : { avance: size, cruce: corto }
+}
 
-  const piezas: Pieza[] = []
-  let sentido: 1 | -1 = 1
-  // Borde por donde avanza la cadena: el derecho si va hacia la derecha.
-  let borde = 0
-  let fila = 0
-  let y = 0
-  let altoFila = 0
-  let primeraDeFila = true
-
-  /** Hueco que queda por delante en esta fila. */
-  const libre = () => (sentido === 1 ? ancho - borde : borde)
-
-  const colocar = (i: number, m: { ancho: number; alto: number }, codo: boolean) => {
-    const sep = primeraDeFila ? 0 : gap
-    const x = sentido === 1 ? borde + sep : borde - sep - m.ancho
-    piezas.push({
-      i, x, y, ancho: m.ancho, alto: m.alto,
-      vertical: codo ? !dobles[i] : dobles[i],
-      espejo: sentido === -1 && !codo,
-      codo, fila, sentido,
-    })
-    borde = sentido === 1 ? x + m.ancho : x
-    altoFila = Math.max(altoFila, m.alto)
-    primeraDeFila = false
-  }
-
-  const girar = () => {
-    y += altoFila + gap
-    fila++
-    altoFila = 0
-    sentido = (sentido === 1 ? -1 : 1) as 1 | -1
-    primeraDeFila = true
-    // `borde` no se toca: la fila nueva arranca justo donde terminó el codo, que
-    // es lo que hace que la ficha de abajo quede debajo de él.
-  }
-
-  for (let i = 0; i < dobles.length; i++) {
-    const tramo = enTramo(dobles[i])
-    const sep = primeraDeFila ? 0 : gap
-    if (libre() >= sep + tramo.ancho) {
-      colocar(i, tramo, false)
-      continue
-    }
-    const codo = enCodo(dobles[i])
-    if (!primeraDeFila && libre() >= gap + codo.ancho) {
-      // Cabe de canto: esta es la ficha del giro.
-      colocar(i, codo, true)
-      girar()
-      continue
-    }
-    // Ni de canto cabe (fila recién abierta en un paño angustiosamente estrecho):
-    // se cierra la fila y la ficha abre la siguiente, como hacía el flex-wrap.
-    if (primeraDeFila) {
-      colocar(i, tramo, false)
-      continue
-    }
-    girar()
-    // Tras girar, el borde es el mismo; la fila nueva empieza con esta ficha.
-    colocar(i, enTramo(dobles[i]), false)
-  }
-
-  if (piezas.length === 0) return { piezas, ancho: 0, alto: 0 }
-  // Si la última ficha fue un codo, `girar()` ya abrió una fila que nadie usó:
-  // su hueco no cuenta para el alto.
-  const alto = altoFila > 0 ? y + altoFila : y - gap
-
-  // Se normaliza a un origen en 0,0: el acomodo puede haber caminado hacia la
-  // izquierda del arranque y lo que le importa a la mesa es la caja que ocupa.
-  const minX = Math.min(...piezas.map((p) => p.x))
-  const maxX = Math.max(...piezas.map((p) => p.x + p.ancho))
-  for (const p of piezas) p.x -= minX
-  return { piezas, ancho: maxX - minX, alto }
+/** Largo que ocupa la cadena entera puesta en línea recta. */
+export function largoDeCadena(dobles: boolean[], size: number, gap: number): number {
+  if (dobles.length === 0) return 0
+  return dobles.reduce((a, d) => a + medidas(size, d).avance, 0) + gap * (dobles.length - 1)
 }
 
 /**
- * El tamaño de ficha más grande con el que la cadena entera **cabe sin scroll**
- * en la caja dada. Se prueba de mayor a menor: son 40 tanteos como mucho sobre
- * 28 fichas, nada que se note.
+ * Tiende la cadena por el paño y devuelve dónde va cada ficha.
+ *
+ * Es un recorrido con cursor y sentido, como se tiende una cadena en una mesa:
+ * la salida ancla el centro y de ahí salen dos brazos —lo jugado por la derecha
+ * hacia un lado, lo jugado por la izquierda hacia el otro—. Cuando un brazo
+ * llega al borde, **dobla**: una ficha de canto hace la esquina, se corre de
+ * lado lo justo para cambiar de carril y vuelve a doblar para seguir en
+ * paralelo. Si hay un doble a mano cerca del borde, ese hace la esquina, que ya
+ * va cruzado y queda natural; si no, dobla con la que toque.
+ *
+ * El eje principal es el lado largo del paño: en un teléfono de pie, el
+ * vertical. Girar el teléfono no necesita código aparte.
+ */
+export function tenderCadena(
+  dobles: boolean[],
+  salida: number,
+  size: number,
+  caja: Caja,
+  gap: number,
+): Acomodo {
+  if (dobles.length === 0) return { piezas: [], ancho: 0, alto: 0 }
+
+  const vertical = caja.alto >= caja.ancho
+  const eje = vertical ? caja.alto : caja.ancho
+  const paso = size + gap
+  const corto = Math.round(size / 2)
+  const piezas: Pieza[] = []
+
+  // La ficha de salida, centrada en el 0 y mirando por el eje principal. Da
+  // igual que sea doble o no: lo único que cambia es cómo se acuesta.
+  const mSal = medidas(size, dobles[salida])
+  const salAncho = vertical ? mSal.cruce : mSal.avance
+  const salAlto = vertical ? mSal.avance : mSal.cruce
+  const mitad = (vertical ? salAlto : salAncho) / 2
+  piezas.push({
+    i: salida, x: -salAncho / 2, y: -salAlto / 2, ancho: salAncho, alto: salAlto,
+    vertical: vertical !== dobles[salida],
+    espejo: false, esquina: false, tramo: 0,
+    sentido: vertical ? 'abajo' : 'derecha',
+  })
+
+  /*
+   * Cuánto eje le toca a cada brazo. A medias desperdiciaría medio paño cuando
+   * la mano se va toda para un lado; repartido por lo que mide cada brazo, los
+   * dos llegan al borde a la vez y se usa el paño entero. Con una sola ficha en
+   * mesa sale 50/50, que es el centro exacto.
+   */
+  const largoDe = (desde: number, hasta: number) =>
+    desde > hasta ? 0 : largoDeCadena(dobles.slice(desde, hasta + 1), size, gap) + gap
+  const largoA = largoDe(salida + 1, dobles.length - 1)
+  const largoB = largoDe(0, salida - 1)
+  const libre = Math.max(0, eje - mitad * 2)
+  const sitioA = largoA + largoB === 0 ? libre / 2 : libre * (largoA / (largoA + largoB))
+  // Los dos bordes del paño, en coordenadas relativas a la salida. Un brazo que
+  // dobla y vuelve tiene por delante el borde contrario: por eso son dos y no
+  // uno, y por eso viven fuera de `tender`.
+  const bordes = { pos: mitad + sitioA, neg: -(mitad + (libre - sitioA)) }
+
+  function tender(
+    desde: number, hasta: number, avanza: 1 | -1,
+    inicial: Sentido, lateral: Sentido, entradaEsA: boolean,
+  ) {
+    if (avanza === 1 ? desde > hasta : desde < hasta) return
+
+    // Lo que queda de cadena por delante en cada punto: sirve para no doblar
+    // por gusto cuando todavía cabe todo recto.
+    const cola: number[] = []
+    let acc = 0
+    for (let i = hasta; avanza === 1 ? i >= desde : i <= desde; i -= avanza) {
+      acc += medidas(size, dobles[i]).avance + gap
+      // Menos el hueco de después de la última: `punto` ya viene pasado el
+      // hueco de la primera. Con el hueco de más, la cuenta se pasa por un pelo
+      // justo cuando la cadena cabe exacta, y doblaba sin necesidad.
+      cola[i] = acc - gap
+    }
+
+    let sentido = inicial
+    let previo = inicial
+    let cruzePrevio = vertical ? salAncho : salAlto
+    let tramo = 1
+    const d0 = DIR[inicial]
+    let punto = { x: d0.dx * (salAncho / 2 + gap), y: d0.dy * (salAlto / 2 + gap) }
+    let carril: { desde: number; volverA: Sentido } | null = null
+
+    const eneje = (p: { x: number; y: number }) => (vertical ? p.y : p.x)
+    const encruce = (p: { x: number; y: number }) => (vertical ? p.x : p.y)
+    const bordeDe = (s: Sentido) => (DIR[s].dx + DIR[s].dy > 0 ? bordes.pos : bordes.neg)
+
+    for (let i = desde; avanza === 1 ? i <= hasta : i >= hasta; i += avanza) {
+      const m = medidas(size, dobles[i])
+
+      if (carril === null) {
+        const dir = DIR[sentido]
+        const signo = dir.dx + dir.dy
+        const borde = bordeDe(sentido)
+        const queda = Math.abs(borde - eneje(punto))
+        // Solo se plantea doblar si lo que falta NO cabe recto. Si cabe, la
+        // cadena sigue de largo aunque pase un doble cerca del borde.
+        const apurado = cola[i] > queda
+        const cabeza = eneje(punto) + signo * m.avance
+        const noCabe = signo > 0 ? cabeza > borde : cabeza < borde
+        /*
+         * Mientras haya que doblar se guarda SIEMPRE una ficha de holgura por
+         * delante. Es porque la esquina ocupa por el eje su lado de través, y el
+         * de un doble es el largo entero: sin la holgura, la esquina se salía
+         * del paño justo en las manos con dobles al final.
+         */
+        const apretado = apurado && queda - m.avance - gap < size
+        // Y si hay que doblar, mejor en un doble: ya va cruzado, así que hace de
+        // esquina sin que se note el remiendo. En el segundo giro —el que vuelve
+        // a poner la cadena en paralelo— los dobles no tienen preferencia.
+        const mejorAqui = apurado && dobles[i] && queda < paso * 3
+        // Y nunca se doblar si la esquina no cabe: sería salirse igual.
+        if ((noCabe || apretado || mejorAqui) && queda >= m.cruce) {
+          carril = { desde: encruce(punto), volverA: OPUESTO[sentido] }
+          sentido = lateral
+          tramo++
+        }
+      }
+
+      // Al doblar, el cursor se corre dos veces: media ficha por el sentido
+      // viejo, para que la esquina caiga limpia detrás de la anterior; y medio
+      // ancho de la anterior hacia atrás por el nuevo, que es lo que alinea las
+      // dos como una L de verdad en vez de dejarlas montadas.
+      if (sentido !== previo) {
+        const v = DIR[previo]
+        const n = DIR[sentido]
+        punto = {
+          x: punto.x + v.dx * (m.cruce / 2) - n.dx * (cruzePrevio / 2),
+          y: punto.y + v.dy * (m.cruce / 2) - n.dy * (cruzePrevio / 2),
+        }
+      }
+
+      const dir = DIR[sentido]
+      const ancho = enVertical(sentido) ? m.cruce : m.avance
+      const alto = enVertical(sentido) ? m.avance : m.cruce
+      const entradaPrimero = sentido === 'abajo' || sentido === 'derecha'
+      piezas.push({
+        i,
+        x: punto.x + (dir.dx > 0 ? 0 : dir.dx < 0 ? -ancho : -ancho / 2),
+        y: punto.y + (dir.dy > 0 ? 0 : dir.dy < 0 ? -alto : -alto / 2),
+        ancho, alto,
+        vertical: enVertical(sentido) !== dobles[i],
+        espejo: entradaEsA ? !entradaPrimero : entradaPrimero,
+        esquina: sentido !== previo,
+        tramo,
+        sentido,
+      })
+      punto = { x: punto.x + dir.dx * (m.avance + gap), y: punto.y + dir.dy * (m.avance + gap) }
+      previo = sentido
+      cruzePrevio = m.cruce
+
+      if (carril !== null) {
+        // ¿Nos hemos corrido lo justo para que el carril nuevo no roce al viejo?
+        // Se cuenta con media ficha estrecha de propina, que es lo que ocupará
+        // de través la primera del tramo siguiente.
+        if (Math.abs(encruce(punto) - carril.desde) + corto / 2 >= paso) {
+          sentido = carril.volverA
+          carril = null
+          tramo++
+        }
+      }
+    }
+  }
+
+  // Lo jugado por la derecha baja y se corre a la derecha; lo de la izquierda
+  // sube y se corre a la izquierda. Así los dos brazos no se pisan nunca.
+  tender(salida + 1, dobles.length - 1, 1,
+    vertical ? 'abajo' : 'derecha', vertical ? 'derecha' : 'abajo', true)
+  tender(salida - 1, 0, -1,
+    vertical ? 'arriba' : 'izquierda', vertical ? 'izquierda' : 'arriba', false)
+
+  piezas.sort((p, q) => p.i - q.i)
+  const minX = Math.min(...piezas.map((p) => p.x))
+  const minY = Math.min(...piezas.map((p) => p.y))
+  const maxX = Math.max(...piezas.map((p) => p.x + p.ancho))
+  const maxY = Math.max(...piezas.map((p) => p.y + p.alto))
+  for (const p of piezas) { p.x -= minX; p.y -= minY }
+  return { piezas, ancho: maxX - minX, alto: maxY - minY }
+}
+
+/**
+ * Por debajo del suelo cómodo solo se baja si no hay más remedio. Es el último
+ * recurso: peor que una ficha pequeña es una cadena que se sale del paño.
+ */
+export const FICHA_APURO = 18
+
+/**
+ * De qué tamaño se pintan las fichas.
+ *
+ * Tres escalones, en este orden:
+ *
+ * 1. **Lo más grande que quepa en una sola recta** por el lado largo del paño.
+ *    Es la vista alejándose conforme la cadena crece, sin doblar nunca.
+ * 2. Si ni al suelo cómodo (`FICHA_MIN`) cabe recta, se planta ahí y **dobla**.
+ *    Ese es el trato: alejar hasta el límite y a partir de ahí girar.
+ * 3. Y si ni doblando cabe —paño diminuto con la mesa llena— se sigue encogiendo
+ *    por debajo del suelo, porque salirse del paño es peor.
  *
  * Si la caja todavía no está medida (0×0) devuelve la estimación de siempre;
  * es lo que ve jsdom, que no hace layout.
  */
-export function tamanoTablero(dobles: boolean[], caja: Caja, gap: number): number {
+export function tamanoTablero(
+  dobles: boolean[],
+  salida: number,
+  caja: Caja,
+  gap: number,
+): number {
   if (caja.ancho <= 0 || caja.alto <= 0) return boardTileSize(dobles.length)
   if (dobles.length === 0) return FICHA_MAX
 
-  for (let size = FICHA_MAX; size > FICHA_MIN; size--) {
-    // Una ficha normal mide `size` de ancho: más ancha que la caja no cabe ni sola.
-    if (size > caja.ancho) continue
-    const acomodo = acomodarCadena(dobles, size, caja.ancho, gap)
-    if (acomodo.alto <= caja.alto && acomodo.ancho <= caja.ancho) return size
+  const eje = Math.max(caja.ancho, caja.alto)
+  const cruce = Math.min(caja.ancho, caja.alto)
+  for (let size = FICHA_MAX; size >= FICHA_MIN; size--) {
+    // Un doble cruzado mide `size` de través: más ancho que la caja no cabe.
+    if (size > cruce) continue
+    if (largoDeCadena(dobles, size, gap) <= eje) return size
   }
-  return FICHA_MIN
+
+  const cabeDoblando = (size: number) => {
+    const a = tenderCadena(dobles, salida, size, caja, gap)
+    return a.ancho <= caja.ancho + 0.5 && a.alto <= caja.alto + 0.5
+  }
+  if (cabeDoblando(FICHA_MIN)) return FICHA_MIN
+  for (let size = FICHA_MIN - 1; size > FICHA_APURO; size--) {
+    if (cabeDoblando(size)) return size
+  }
+  return FICHA_APURO
 }
 
 /**

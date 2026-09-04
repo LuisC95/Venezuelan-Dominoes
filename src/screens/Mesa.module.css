@@ -41,53 +41,72 @@
 .handNoLabel { font-weight: 500; font-size: 8px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted-2); }
 .handNoValue { font-family: var(--font-display); font-size: 14px; line-height: 1; color: var(--gold); }
 
-/* --- rivales y pareja --- */
-.middle { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 0; gap: 10px; }
-/*
- * Cada quien en su lado, como en una mesa de verdad: tu pareja al frente y los
- * dos rivales a los costados. Los de los lados van estrechos a propósito — lo
- * que le quiten de ancho al paño se lo quitan a las fichas.
- */
-.arriba { flex: 0 0 auto; display: flex; justify-content: center; }
-/* stretch, no center: el paño no tiene alto propio (su contenido es absoluto),
-   así que si no se estira se queda en nada. Los chips sí se centran. */
-.centro { flex: 1; min-height: 0; display: flex; align-items: stretch; gap: 6px; }
-.centro > .felt { flex: 1; min-width: 0; }
+/* --- el paño, que ahora se queda con la pantalla --- */
+.middle { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 10px 12px 0; gap: 8px; }
 
+/*
+ * Los tres jugadores van ENCIMA del paño, cada quien en su lado: la pareja al
+ * frente y los rivales a los costados. Estaban AL LADO y costaban ~104px de
+ * ancho más una franja de alto para el chat; con eso la cadena se ahogaba y las
+ * fichas bajaban a 23px. La caja donde se tiende la cadena se mete hacia dentro
+ * lo que ocupan (HUECO_CHIPS en Mesa.tsx), así que no pasa por debajo de nadie.
+ */
 .rival {
-  display: flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 8px 10px; border-radius: var(--r-lg);
-  background: var(--surface-soft); border: 1px solid rgba(242, 234, 216, .08);
-  min-width: 74px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 5px 6px; border-radius: var(--r-lg);
+  background: rgba(11, 16, 32, .72); border: 1px solid rgba(242, 234, 216, .1);
+  backdrop-filter: blur(3px);
+  position: relative;
 }
-.rivalLado {
-  flex: 0 0 auto; align-self: center;
-  width: 46px; min-width: 0;
-  padding: 7px 3px; gap: 4px;
-}
-.rivalLado .rivalName { max-width: 40px; font-size: 10px; }
+.rivalCara { position: relative; width: 30px; height: 30px; flex: 0 0 auto; }
+.arriba { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5; }
+.lado { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; }
+.ladoIzq { left: 6px; }
+.ladoDer { right: 6px; }
+
 .rivalBot {
   font-weight: 600; font-size: 7px; line-height: 1;
   letter-spacing: .18em; text-transform: uppercase; color: var(--blue-soft);
 }
-.rivalLado .rivalMeta { font-family: var(--font-display); font-size: 15px; letter-spacing: 0; }
-.rivalActive { background: rgba(227, 178, 60, .12); border-color: var(--gold); }
+.rivalActive { background: rgba(227, 178, 60, .18); border-color: var(--gold); }
+.rivalName {
+  font-weight: 500; font-size: 10px; line-height: 1; color: var(--ivory-soft);
+  white-space: nowrap; max-width: 56px; overflow: hidden; text-overflow: ellipsis;
+}
+.rivalMeta {
+  font-family: var(--font-display); font-size: 14px; line-height: 1;
+  color: var(--muted-3);
+}
+.rivalMetaActive { color: var(--gold); }
+.rivalOff {
+  font-family: var(--font-ui); font-size: 8px; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--lose);
+}
 /* Acaba de poner una ficha. Va junto con la ficha entrando desde su lado: una
    cosa dice de dónde vino y la otra de quién fue. */
 .rivalJugo { animation: om-jugo .7s ease-out; }
 @keyframes om-jugo {
-  0% { background: rgba(227, 178, 60, .45); border-color: var(--gold-soft); transform: scale(1.06); }
-  100% { background: var(--surface-soft); border-color: rgba(242, 234, 216, .08); transform: none; }
+  0% { background: rgba(227, 178, 60, .5); border-color: var(--gold-soft); transform: scale(1.08); }
+  100% { background: rgba(11, 16, 32, .72); border-color: rgba(242, 234, 216, .1); transform: none; }
 }
-.rivalName {
-  font-weight: 500; font-size: 11px; line-height: 1; color: var(--ivory-soft);
-  white-space: nowrap; max-width: 86px; overflow: hidden; text-overflow: ellipsis;
+/* Le tocó pasar. El pase es automático: si no se marca, no se entera nadie. */
+.rivalPaso { animation: om-paso .6s ease-out; }
+@keyframes om-paso {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  80% { transform: translateX(-2px); }
 }
-.rivalMeta { font-size: 9px; line-height: 1; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
-.rivalMetaActive { color: var(--gold); }
-.rivalOff { color: var(--lose); }
+.cartelPaso {
+  position: absolute; top: 100%; left: 50%; margin-top: 3px;
+  transform: translateX(-50%);
+  padding: 2px 6px; border-radius: var(--r-pill);
+  background: var(--lose); color: var(--ink-deep);
+  font-weight: 600; font-size: 8px; line-height: 1.3;
+  letter-spacing: .16em; text-transform: uppercase; white-space: nowrap;
+  animation: om-autor 1.4s ease-out both;
+}
 
-/* --- el paño --- */
 .felt {
   flex: 1; min-height: 0;
   border-radius: var(--r-xl);
@@ -96,11 +115,14 @@
   position: relative; overflow: hidden;
   box-shadow: inset 0 0 60px rgba(0, 0, 0, .5);
 }
-/*
- * Sin scroll y sin padding: el tamaño de las fichas se calcula contra lo que
- * mide el felt (ver AIRE_TABLERO y HUECO_TABLERO en Mesa.tsx), así que el aire
- * y el hueco los pone el cálculo. El overflow oculto es solo un cinturón.
- */
+/* El chat flota en una esquina del paño en vez de comerle una franja entera de
+   alto. Las burbujas ya se apagan solas, así que casi siempre no hay nada. */
+.chatFlotante {
+  position: absolute; left: 8px; right: 8px; bottom: 6px; z-index: 6;
+  pointer-events: none;
+}
+.chatFlotante > * { pointer-events: auto; }
+
 .board {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
@@ -200,12 +222,13 @@
   color: rgba(227, 178, 60, .45);
 }
 .ends {
-  position: absolute; left: 10px; top: 10px;
+  position: absolute; left: 50%; top: 6px; transform: translateX(-50%);
   font-weight: 500; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
   color: rgba(242, 234, 216, .32);
 }
 .passLine {
-  position: absolute; right: 10px; bottom: 10px;
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  max-width: 70%; text-align: center;
   font-size: 11px; letter-spacing: .04em; color: rgba(242, 234, 216, .55);
 }
 
@@ -224,6 +247,21 @@
   letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
 }
 .turnMine { color: var(--gold); }
+.miCara { position: relative; width: 32px; height: 32px; flex: 0 0 auto; }
+.turnSegundos {
+  margin-left: 8px; font-family: var(--font-display); font-size: 13px;
+  letter-spacing: 0; text-transform: none; color: var(--muted-3);
+}
+/* Te saltaron. En Android va con vibración; en iPhone esto es todo lo que hay,
+   porque Safari no deja vibrar. */
+.pasaste {
+  align-self: center;
+  padding: 6px 14px; border-radius: var(--r-pill);
+  background: rgba(224, 121, 111, .16); border: 1px solid var(--lose);
+  color: var(--lose); font-weight: 600; font-size: 11px; line-height: 1;
+  letter-spacing: .16em; text-transform: uppercase;
+  animation: om-autor 1.8s ease-out both;
+}
 
 .puntas { display: flex; gap: 10px; align-items: center; justify-content: center; }
 .punta {
@@ -507,4 +545,27 @@
   .piezaViva { animation: none; }
   .autor { animation: om-autor 1.4s steps(1, end) both; }
   @keyframes om-aparece { from { opacity: 0 } to { opacity: 1 } }
+}
+
+
+/*
+ * Ahogaste al que juega después de ti: le dejaste dos puntas que no tiene y le
+ * tocó pasar. Se celebra con un borde verde por toda la pantalla, como cuando
+ * se suman puntos. Sin vibración: vibrar es para lo que te pasa a ti.
+ */
+.verde {
+  position: absolute; inset: 0; z-index: 30; pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 3px var(--ok), inset 0 0 40px rgba(79, 160, 122, .55);
+  animation: om-verde 1.2s ease-out both;
+}
+@keyframes om-verde {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rivalJugo, .rivalPaso, .verde, .pasaste, .cartelPaso { animation-duration: .01s; }
+  .verde { opacity: .6; animation: none; }
 }

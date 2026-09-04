@@ -114,13 +114,14 @@ nivel más arriba, porque no son código: si clonaste solo el repo no los tienes
 app/                          este repo
 ├── AGENTS.md                 este archivo
 ├── src/
-│   ├── components/           Ficha (puerto 1:1 del prototipo), Avatar, Chat
+│   ├── components/           Ficha (puerto 1:1 del prototipo), Avatar, Chat,
+│   │                         RelojTurno
 │   ├── game/
 │   │   ├── tiles.ts          utilidades de fichas — ESPEJO, no autoridad
 │   │   ├── state.ts          tipos exactos de get_game_state / get_room_state
 │   │   └── view.ts           cálculos de presentación y acomodo de la mesa
 │   ├── hooks/                useAuth, useRoom, useGameState, useAccion, useLatido,
-│   │                         useMensajes, useTamano, useCadenaVisible, useMano
+│   │                         useMensajes, useTamano, useColaDeJugadas, useMano
 │   ├── lib/                  supabase.ts (cliente), api.ts (RPCs tipadas)
 │   ├── screens/              Inicio, Lobby, Mesa, Cola, FinPartida, Perfil
 │   │                         (+ un .module.css cada una)
@@ -262,7 +263,7 @@ node scripts/ui-cola.mjs      # cola, sueltos, fin de partida y rey de la cancha
 node scripts/ui-reconexion.mjs # overlay de reconexión y anular mano trabada
 node scripts/ui-chat.mjs      # emotes, chat en vivo y freno del servidor
 node scripts/ui-perfil.mjs    # historial, estadísticas y pareja frecuente
-node scripts/ui-ajuste.mjs    # que quepan sin scroll y que el codo cuadre, jugada a jugada
+node scripts/ui-ajuste.mjs    # que quepan sin scroll y que la cadena se siga, jugada a jugada
 node scripts/ui-bots.mjs      # rellenar la mesa con bots desde el lobby
 ```
 
@@ -348,6 +349,14 @@ Seis cosas que costaron tiempo. No las repitas.
    adelantada** y `void_hand` lo rechazaba. La mesa **relee cada 10s mientras
    espera**, que además es lo único que la entera de que el jugador volvió.
    Si añades otra espera larga sin eventos, acuérdate de refrescar dentro.
+
+   **Y aun así, un segundo de margen** (`MARGEN_RELOJ_S`) antes de ofrecer el
+   botón. Los números, medidos contra el Supabase real: el reloj de esta máquina
+   va **1,575s por detrás**, deriva **2,1 ms/s** (21ms entre refrescos) y la
+   latencia p95 es de **136ms**. Hacen falta ~157ms, y como la cuenta va en
+   segundos enteros, un tic es el mínimo que se puede pedir. **Los segundos que
+   se muestran no llevan margen**: eso sería mentir. Si cambias el intervalo de
+   refresco de la espera, rehaz esta cuenta.
 
 Además, al escribir pruebas contra la UI: **espera a que el DOM refleje el
 cambio**, no a que el servidor lo tenga. Leer el estado desde otro cliente y
@@ -501,103 +510,128 @@ Tres cosas que hay que respetar si se toca esto:
    corto como `round(size / 2)`: un lado largo impar se redondea hacia arriba y
    cada ficha se pasa medio píxel — con siete en la mano, 3px de scroll.
 
-### La cadena serpentea, y el giro cuadra
+### La cadena corre por el lado largo del teléfono
 
-Que quepa no basta: con `flex-wrap` normal, la ficha que sigue a la última de
-una línea aparecía al otro extremo de la pantalla y **se perdía la seguidilla**
-(lo reportó el usuario jugando). El primer arreglo fue pintar las filas por
-separado alternando el sentido, pero **eso tampoco bastaba**: el reparto en
-filas es codicioso, así que a cada fila le sobra un trozo distinto, la par
-pegaba a la izquierda y la impar a la derecha, y el punto de unión se corría
-hasta un ancho de ficha. Desordenado otra vez, y sin saber cuál era cada punta.
+Que quepa no basta. Primero fue `flex-wrap`, y la ficha que seguía a la última de
+una línea aparecía al otro extremo. Luego filas alternando el sentido, y el punto
+de unión bailaba porque a cada fila le sobra un trozo distinto. Luego codos que
+cuadraban, y **seguía sin leerse**: el usuario lo probó jugando y la cadena daba
+cinco vueltas con fichas de 23px.
 
-Ahora la cadena **no es flex**: `acomodarCadena` (en `game/view.ts`) recorre las
-fichas y devuelve la posición exacta de cada una, y la mesa las coloca por
-coordenada. El giro lo hace **una ficha puesta de canto**, como en una mesa de
-verdad: la última de la fila se gira 90° y la fila siguiente arranca pegada a su
-borde exterior. La unión cuadra por construcción, no por suerte.
+El problema de fondo era de **sitio**. El paño perdía ~104px de ancho por los
+chips de los rivales a los costados y una franja de alto por el chat, y encima la
+cadena corría en **horizontal**, que es el lado corto de un teléfono de pie. El
+eje útil eran ~226px.
 
-Tres cosas que hay que respetar si se toca esto:
+Ahora:
 
-- **La entrada y la salida de cada ficha son `a` y `b`**, siempre. De ahí sale
-  la regla de pintado entera: tramo hacia la derecha `top=a, bottom=b`; hacia la
-  izquierda al revés (`espejo`); y **el codo siempre `top=a, bottom=b`**, porque
-  entra por arriba y sale por abajo, que es por donde sigue la fila de abajo.
-- **Un doble va de canto en el tramo y acostado en el codo**: es la ficha girada
-  90° respecto a por dónde va la cadena, no una orientación fija.
-- El codo hace que su fila mida `size` de alto en vez de `size/2`, pero también
-  ocupa menos ancho, así que **cabe una ficha más por fila**. Medido: el acomodo
-  nuevo nunca sale más alto que el viejo, y el peor caso del arnés sigue en 23px.
+- **El paño se queda con la pantalla.** Los tres jugadores van encima, pegados a
+  sus bordes, y el chat flota en una esquina. La caja donde se tiende la cadena
+  se mete hacia dentro lo que ocupan (`MARGEN_ARRIBA`, `MARGEN_ABAJO`,
+  `MARGEN_LADOS` en `Mesa.tsx`).
+- **La cadena corre por el lado largo del paño**, que en un teléfono de pie es el
+  vertical. El eje útil pasa de ~226 a ~420px. Girar el teléfono no necesita
+  código aparte: el eje se elige midiendo.
+- `tenderCadena` (en `game/view.ts`) es un recorrido con **cursor y sentido**. La
+  salida ancla el centro y de ahí salen **dos brazos**: lo jugado por la derecha
+  hacia un lado y lo de la izquierda hacia el otro.
+- Cuando un brazo llega al borde, **dobla**: una ficha de canto hace la esquina,
+  se corre de lado lo justo para cambiar de carril y vuelve a doblar para seguir
+  **en paralelo**.
 
-### Las puntas se ven
+Cinco cosas que se rompen por separado si se toca esto:
 
-El rótulo `Puntas 3 · 5` de la esquina no decía **cuál** era cuál. Ahora las dos
-fichas de los extremos llevan halo dorado y un badge con su número pegado al
-borde libre, y los botones `◀ Punta 3` / `Punta 5 ▶` del pie **resaltan su punta
-en el tablero** al señalarlos. El badge se monta a medias sobre la ficha y sale
-hacia fuera: ese es el sitio para el que se subió `AIRE_TABLERO` a 12px.
+1. **La entrada y la salida de cada ficha son `a` y `b`**, y de ahí sale el
+   pintado entero: si el tramo va en el sentido de avance (abajo/derecha)
+   `top=a, bottom=b`; si va al revés, `espejo`. No hay caso especial para la
+   esquina — es una ficha más, solo que en otro sentido.
+2. `vertical` de la `Ficha` es «el tramo va en vertical» **XOR** «la ficha es
+   doble». La normal se acuesta a lo largo de la línea y el doble se cruza.
+3. **Al doblar, el cursor se corre dos veces**: media ficha por el sentido viejo
+   y medio ancho de la anterior hacia atrás por el nuevo. Sin las dos, la esquina
+   se monta encima de la ficha anterior.
+4. **Mientras haya que doblar se guarda una ficha entera de holgura por
+   delante.** La esquina ocupa por el eje su lado de través, y el de un doble es
+   el largo: sin la holgura se salía del paño justo en las manos con dobles al
+   final.
+5. **El reparto del eje entre los dos brazos va por lo que mide cada uno**, no a
+   medias: a medias se desperdicia medio paño cuando la mano se va toda para un
+   lado. Con una sola ficha en mesa sale 50/50, que es el centro exacto.
 
-Los números del badge salen de **lo que se está viendo**, no de
-`hand.left_end` / `right_end`: mientras se reproduce una ráfaga de bots el
-tablero va unas fichas por detrás del servidor.
+### La vista se aleja hasta un tope, y a partir de ahí dobla
 
-### Se ve quién puso cada ficha
+`tamanoTablero` tiene tres escalones, y ese orden es la decisión de producto:
 
-`board[i]` traía `seat` y `played_order` desde siempre y la UI no los miraba.
-Ahora la ficha nueva **entra desde el lado de quien la jugó** (tu pareja al
-frente, los rivales a los costados, tú desde abajo — la misma vuelta horaria de
-`otherSeats`, en `ladoDelAsiento`), el chip de esa persona destella y su nombre
-aparece un instante junto a la ficha.
+1. **Lo más grande que quepa en una sola recta.** La cadena es una línea que se
+   va alejando conforme crece, sin doblar. Es lo más legible que hay.
+2. Si ni al suelo cómodo (`FICHA_MIN`, **28px**) cabe recta, se planta ahí y
+   **dobla**. Ese es el trato que pidió el usuario: alejar hasta el límite y a
+   partir de ahí girar.
+3. Y si ni doblando cabe —paño diminuto con la mesa llena— sigue encogiendo
+   hasta `FICHA_APURO` (18px), porque salirse del paño es peor.
 
-Y como **los bots juegan dentro de la misma transacción** que el humano, dos o
-tres jugadas llegaban en un solo refresco y aparecían todas a la vez.
-`useCadenaVisible` las encola y las suelta **una cada 500ms**. Dos detalles:
+El tamaño **nunca crece** al añadir una ficha, así que la cadena no da tirones.
 
-- Se cuenta por `played_order`, **no por posición en el array**: `board` va
-  ordenado por `board_position` y una jugada por la izquierda se mete al
-  principio, así que quedarse con "las primeras N" enseñaría la ficha nueva y
-  escondería la del otro extremo.
-- El acomodo se calcula sobre el tablero **entero**, no sobre lo visible: si no,
-  la cadena se reacomodaría con cada revelado y quedaría temblando.
+Con los paños reales, el suelo de 28px deja **14 fichas en línea recta** en un
+teléfono normal (16 en uno grande, 7 en uno de 320px). Subir el suelo cambia ese
+número: a 34px son 12, a 24px son 16. Es la única palanca, y **el número de
+fichas rectas es la forma útil de pensarla**, no los píxeles.
 
-Es solo presentación. El estado bueno sigue siendo el del servidor; como mucho
-el tablero va medio segundo por detrás.
+`FICHA_MIN` **no es una promesa**: en el paño más apretado se baja de ahí. La
+prueba lo comprueba así a propósito.
 
-### Tu mano: ordenarla y voltearla
+### Se ve quién puso cada ficha, y a quién le tocó pasar
 
-Cosa tuya y de nadie más: el servidor manda `my_hand` en su orden y no sabe nada
-de esto. Tres gestos, en `ManoPropia`:
+`board[i]` trae `seat` y `played_order`, y `recent_moves` trae jugadas **y
+pases** en el mismo orden. `useColaDeJugadas` las suelta **una cada 500ms**,
+porque los bots juegan dentro de la misma transacción que el humano y si no
+caían dos o tres de golpe.
 
-| toque corto | jugar |
-| pulsar y mover (>8px) | ordenar |
-| mantener pulsado 450ms | voltear la ficha 180° |
+- La ficha nueva **entra desde el lado de quien la jugó** (`ladoDelAsiento`) y el
+  chip de esa persona destella.
+- **Te tocó pasar**: vibra y sale el cartel. `navigator.vibrate` **no existe en
+  iPhone** —Safari no lo implementa, ni como PWA—, así que el cartel no es
+  opcional: es lo único que ven ellos.
+- **Pasa el que juega justo después de ti**: borde verde por toda la pantalla. Lo
+  ahogaste tú. Sin vibración, que vibrar es para lo que te pasa a ti.
 
-El volteo se lleva la pulsación larga porque los otros dos gestos ya estaban
-cogidos. Y **ordenar y voltear funcionan aunque no sea tu turno** —es cuando más
-falta hace—, así que el `<button disabled>` lleva `pointer-events: none` y los
-gestos viven en el envoltorio: el `disabled` se queda donde tiene que estar.
+Se cuenta por `move_number` y las jugadas se casan con su ficha **por el texto de
+la ficha**: una ficha se juega una sola vez por mano, así que identifica sin
+ambigüedad. `recent_moves` trae ocho como mucho; si el salto es mayor —entrar a
+mitad de mano, reconectarse— se salta al día sin reproducir.
 
-El destino del arrastre vive en el **ref**, no en el estado: soltar enseguida
-después de mover ejecuta las dos cosas en el mismo tick y React todavía no se ha
-enterado. Se guarda por mano en `localStorage` (`domino.mano.<hand_id>`) y se
-reconcilia contra `my_hand`, que es la autoridad de qué fichas te quedan.
+### El reloj de turno
+
+`components/RelojTurno.tsx`: un anillo alrededor del avatar de quien tiene el
+turno. **Cuenta hacia arriba y no echa a nadie** — un límite duro se pelearía con
+la regla de que la mesa espera indefinidamente. El color (verde → ámbar a los
+30s → rojo al minuto) es presión social, no una regla.
+
+Va contra `turn_started_at` **sumándole `desfase`**, nunca con el reloj del
+teléfono. Y `useLatido` se monta **dentro del componente pequeño**: en la mesa
+entera repintaría el tablero cada segundo.
 
 ### Cada quien en su lado
 
 Tu pareja al frente y los dos rivales a los costados, no los tres en fila arriba
 como hacía el prototipo. El turno gira en sentido horario, así que **el que
-juega después de ti queda a tu izquierda**.
+juega después de ti queda a tu izquierda** — y de ahí sale también desde qué
+lado entra volando cada ficha, y a quién ahogas cuando le toca pasar.
 
-Cuesta ancho de paño: dos chips de 46px más los huecos son ~104px menos para las
-fichas. En el peor caso medido —teléfono chico, chat abierto y 21 fichas— la
-ficha baja a 23px de lado largo, casi el suelo de `FICHA_MIN`. Si algún día
-estorba, los dos botones son estrechar más `.rivalLado` o bajar el alto del
-historial del chat, que es lo que de verdad aplasta el tablero.
+Los chips van **encima del paño**, no al lado. Al lado costaban ~104px de ancho
+y el chat otra franja de alto, y con eso la ficha bajaba a 23px. Encima cuestan
+`MARGEN_LADOS` por costado —que sale casi gratis, porque la cadena corre por el
+vertical y el ancho no decide el tamaño de la ficha— y `MARGEN_ARRIBA` /
+`MARGEN_ABAJO`, que sí cuestan y por eso son lo más justo posible.
+
+Si algún día hay que recuperar alto, los dos botones son bajar `MARGEN_ABAJO`
+(sacando la fila de emotes del paño) o hacer el chip de la pareja más plano.
 
 Lo que queda fuera del arnés: jsdom no hace layout, así que la prueba finge la
 medida y comprueba los px que la app decidió. La fidelidad visual de verdad
-—colores, sombras, cómo se ve en la mano— sigue necesitando abrirlo en un
-teléfono (`npm run dev` y entrar por la LAN).
+—colores, sombras, cómo se lee la cadena con el teléfono en la mano, y **que
+vibre**— sigue necesitando abrirlo en un teléfono (`npm run dev` y entrar por la
+LAN, con dos bots sentados para forzar pases).
 
 ---
 

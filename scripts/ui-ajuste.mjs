@@ -30,10 +30,17 @@ const AIRE_MANO = 3
  * pantalla de 320 quedan ~192; en una de 430, ~302.
  */
 const CAJAS = [
-  { nombre: 'teléfono chico', ancho: 192, alto: 200 },
-  { nombre: 'teléfono grande', ancho: 302, alto: 300 },
-  { nombre: 'con el chat abierto', ancho: 192, alto: 110 },
+  { nombre: 'teléfono chico', ancho: 296, alto: 430 },
+  { nombre: 'teléfono grande', ancho: 366, alto: 560 },
+  { nombre: 'apretado', ancho: 260, alto: 330 },
 ]
+/* Lo que el paño se reserva para los chips de los jugadores y el chat, que van
+   ENCIMA. Los mismos valores que Mesa.tsx. */
+const MARGEN_ARRIBA = 62
+const MARGEN_ABAJO = 44
+const MARGEN_LADOS = 56
+/** El suelo de legibilidad: la ficha no puede bajar de aquí. */
+const FICHA_MIN = 28
 
 const app = await bootApp({ as: 'Rafa' })
 const { doc, text, until, byText, click, type, wait, window } = app
@@ -78,9 +85,9 @@ function fichasDelTablero() {
   return [...inner.children].map((el) => {
     const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform)
     return {
-      fila: Number(el.dataset.fila),
-      sentido: Number(el.dataset.sentido),
-      codo: el.dataset.codo === '1',
+      tramo: Number(el.dataset.tramo),
+      dir: el.dataset.dir ?? '',
+      esquina: el.dataset.esquina === '1',
       punta: el.dataset.punta ?? null,
       x: Number(m?.[1] ?? 0),
       y: Number(m?.[2] ?? 0),
@@ -98,27 +105,32 @@ function cajaDeCadena(fichas) {
   }
 }
 
-const filasDe = (fichas) => [...new Set(fichas.map((f) => f.fila))].sort((a, b) => a - b)
+/** Distancia mínima entre dos fichas: 0 si se tocan o se pisan. */
+function separacion(a, b) {
+  const dx = Math.max(0, Math.max(a.x - (b.x + b.ancho), b.x - (a.x + a.ancho)))
+  const dy = Math.max(0, Math.max(a.y - (b.y + b.alto), b.y - (a.y + a.alto)))
+  return Math.hypot(dx, dy)
+}
+const sePisan = (a, b) =>
+  a.x < b.x + b.ancho - 0.5 && b.x < a.x + a.ancho - 0.5
+  && a.y < b.y + b.alto - 0.5 && b.y < a.y + a.alto - 0.5
 
 /**
- * El giro cuadra: la primera ficha de una fila arranca justo en el borde por
- * donde salió el codo de la fila anterior.
+ * LA invariante de la mesa: **la cadena se sigue**.
  *
- * Es la comprobación que antes no existía y que faltaba: con `flex-wrap` las
- * dos filas pegaban a lados distintos y el punto de unión se corría hasta un
- * ancho de ficha, que es lo que hacía perder la seguidilla jugando.
+ * Cada ficha toca a la siguiente y ninguna se pisa con ninguna. Es más fuerte
+ * que contar filas y sentidos —que era lo que se miraba antes— y no depende de
+ * cómo esté tendida: sirve igual para una recta, para un giro o para lo que
+ * venga después.
  */
-function codoDescuadrado(fichas) {
-  const filas = filasDe(fichas)
-  for (let k = 1; k < filas.length; k++) {
-    const previa = fichas.filter((f) => f.fila === filas[k - 1])
-    const actual = fichas.filter((f) => f.fila === filas[k])
-    const codo = previa.at(-1)
-    if (!codo.codo) continue
-    const borde = codo.sentido === 1 ? codo.x + codo.ancho : codo.x
-    const arranque = actual[0].sentido === 1 ? actual[0].x : actual[0].x + actual[0].ancho
-    if (Math.abs(borde - arranque) > 1) {
-      return `fila ${filas[k]}: el codo sale en ${borde} y la fila arranca en ${arranque}`
+function cadenaRota(fichas, gap) {
+  for (let i = 0; i + 1 < fichas.length; i++) {
+    const d = separacion(fichas[i], fichas[i + 1])
+    if (d > gap + 1.5) return `la ${i} y la ${i + 1} se separan ${d.toFixed(1)}px`
+  }
+  for (let i = 0; i < fichas.length; i++) {
+    for (let j = i + 1; j < fichas.length; j++) {
+      if (sePisan(fichas[i], fichas[j])) return `la ${i} y la ${j} se pisan`
     }
   }
   return null
@@ -230,37 +242,41 @@ while (st.hand.status === 'active' && guard++ < 200) {
     if (fichas.length === 0) continue
     masFichas = Math.max(masFichas, fichas.length)
 
-    const disponible = { ancho: caja.ancho - AIRE_TABLERO * 2, alto: caja.alto - AIRE_TABLERO * 2 }
+    const disponible = {
+      ancho: caja.ancho - AIRE_TABLERO * 2 - MARGEN_LADOS * 2,
+      alto: caja.alto - AIRE_TABLERO * 2 - MARGEN_ARRIBA - MARGEN_ABAJO,
+    }
     const ocupa = cajaDeCadena(fichas)
 
-    if (ocupa.ancho > disponible.ancho || ocupa.alto > disponible.alto) {
+    if (ocupa.ancho > disponible.ancho + 1 || ocupa.alto > disponible.alto + 1) {
       r.check(`cabe con ${fichas.length} fichas en ${caja.nombre}`, false,
-        `${ocupa.ancho}×${ocupa.alto} en ${disponible.ancho}×${disponible.alto}`)
+        `${Math.round(ocupa.ancho)}×${Math.round(ocupa.alto)} en ${disponible.ancho}×${disponible.alto}`)
       revisiones = -1
       break
     }
 
-    // La cadena tiene que serpentear: si dos filas seguidas van en el mismo
-    // sentido, la continuación aparece al otro extremo y se pierde el hilo.
-    const filas = filasDe(fichas)
-    const sentidos = filas.map((n) => fichas.find((f) => f.fila === n).sentido)
-    if (sentidos.some((s, k) => s !== (k % 2 === 1 ? -1 : 1))) {
-      r.check('las filas alternan de sentido', false,
-        sentidos.map((s) => (s === 1 ? '→' : '←')).join(''))
+    const rota = cadenaRota(fichas, HUECO_TABLERO)
+    if (rota) {
+      r.check('la cadena se sigue de una ficha a la siguiente', false, rota)
       revisiones = -1
       break
     }
 
-    // Y el giro tiene que cuadrar, que es lo que hace que se siga con la vista.
-    const descuadre = codoDescuadrado(fichas)
-    if (descuadre) {
-      r.check('el codo cuadra con la fila siguiente', false, descuadre)
+    /*
+     * El suelo que pidió el usuario. Es una preferencia, no una promesa: en un
+     * paño diminuto con la mesa llena se baja de ahí, porque salirse del paño
+     * es peor que una ficha pequeña. Lo que sí se comprueba es que solo se baje
+     * cuando de verdad no cabía.
+     */
+    const lado = Math.max(...fichas.map((f) => Math.max(f.ancho, f.alto)))
+    if (lado < FICHA_MIN && caja.nombre !== 'apretado') {
+      r.check('la ficha no baja del suelo salvo en el paño más apretado',
+        false, `${lado}px < ${FICHA_MIN}px en ${caja.nombre}`)
       revisiones = -1
       break
     }
 
-    // Las dos puntas de juego, marcadas: una al principio de la cadena y otra
-    // al final, ni más ni menos.
+    // Las dos puntas de juego, marcadas: una al principio y otra al final.
     const puntas = fichas.filter((f) => f.punta).map((f) => f.punta).join('')
     if (fichas.length > 1 && puntas !== 'lr') {
       r.check('las dos puntas están marcadas en el tablero', false, `puntas: "${puntas}"`)
@@ -296,14 +312,14 @@ while (st.hand.status === 'active' && guard++ < 200) {
   if (revisiones < 0) break
 }
 
-r.check('la cadena cupo, serpenteó con el codo cuadrado y no perdió fichas',
+r.check('la cadena cupo, se siguió entera y no perdió fichas ni legibilidad',
   revisiones > 0, `${revisiones} comprobaciones, hasta ${masFichas} fichas, holgura mínima ${peorHolgura}px`)
 
 console.log(`  la más pequeña que se llegó a pintar: ${ladoMinimo}px de lado largo` +
   ` (${fichasMinimo} fichas, ${cajaMinima})`)
 
 r.head('Sin encoger de más')
-r.check('a media partida la ficha sigue siendo legible', ladoMedioJuego >= 36,
+r.check('a media partida la ficha se sigue leyendo', ladoMedioJuego >= FICHA_MIN,
   `${ladoMedioJuego}px de lado largo con ${fichasEntonces} fichas`)
 r.check('todas las fichas del tablero miden igual', siempreIguales)
 

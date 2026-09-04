@@ -7,26 +7,47 @@ import { Ficha } from '../components/Ficha'
 import { Avatar } from '../components/Avatar'
 import { Chat } from '../components/Chat'
 import * as api from '../lib/api'
+import { vibrar } from '../lib/vibrar'
 import { isDouble, parseTile } from '../game/tiles'
 import type { Side, Tile } from '../game/tiles'
 import { useLatido } from '../hooks/useLatido'
 import { useTamano } from '../hooks/useTamano'
 import { useMensajes } from '../hooks/useMensajes'
 import {
-  acomodarCadena, hacerSinSeñal, ladoDelAsiento, otherSeats, segundosSinSeñal, tamanoMano,
-  tamanoTablero, teamNames, trailingPasses,
+  hacerSinSeñal, ladoDelAsiento, otherSeats, segundosSinSeñal, tamanoMano,
+  tamanoTablero, teamNames, tenderCadena, trailingPasses,
 } from '../game/view'
 import type { Pieza } from '../game/view'
-import { useCadenaVisible } from '../hooks/useCadenaVisible'
+import { RelojTurno, SegundosTurno } from '../components/RelojTurno'
+import { useColaDeJugadas } from '../hooks/useCadenaVisible'
 import { useMano } from '../hooks/useMano'
 import type { FichaMano } from '../hooks/useMano'
 import type {
-  BoardTile, GameState, HandEndType, HandTile, SeatInfo, TeamIndex,
+  BoardTile, GameState, HandEndType, HandTile, RecentMove, Seat, SeatInfo, TeamIndex,
 } from '../game/state'
 import s from './Mesa.module.css'
 
 /** Los mismos 60s que exige void_hand en el servidor. */
 const UMBRAL_ANULAR_S = 60
+/*
+ * Y un par de segundos de propina antes de ofrecer el botón.
+ *
+ * La cuenta de la pantalla se corrige con `desfase`, pero esa medida se toma en
+ * un fetch y envejece; encima el reloj de la máquina se va yendo. Ofreciendo el
+ * botón justo en el 60 se llegaba a pulsar con la cuenta unas décimas
+ * adelantada y `void_hand` respondía "el jugador de turno sigue conectado": el
+ * anfitrión veía un botón que no funcionaba. Dos segundos de espera de más se
+ * notan mucho menos que eso. Ver la trampa 6 de AGENTS.md.
+ *
+ * Los segundos que se MUESTRAN no llevan margen: eso sería mentir.
+ *
+ * Un segundo, no dos: medido contra el servidor real, la deriva de este equipo
+ * es de 2,1 ms/s (21ms entre refrescos) y la latencia p95 de 136ms, así que
+ * hacen falta ~157ms. Como la cuenta va en segundos enteros, un tic es el
+ * mínimo que se puede pedir y sobra de largo. Si algún día se toca el intervalo
+ * de refresco de la espera, esta cuenta hay que rehacerla.
+ */
+const MARGEN_RELOJ_S = 1
 
 /*
  * Medidas del acomodo de fichas. Viven aquí y se aplican en línea —no en el
@@ -47,11 +68,24 @@ const HUECO_MANO = 8
 const AIRE_MANO = 3
 /** Tu mano no crece más que esto aunque sobre sitio. */
 const FICHA_MANO_MAX = 104
+/*
+ * Lo que se le quita al paño por cada lado, ahora que los jugadores y el chat
+ * van ENCIMA. Los de los costados salen gratis: la cadena corre por el lado
+ * largo —el vertical— y el ancho no decide el tamaño de la ficha. Los de arriba
+ * y abajo sí cuestan, y por eso son lo más justo posible.
+ */
+/** El chip de tu pareja, arriba al centro. */
+const MARGEN_ARRIBA = 62
+/** La fila de emotes del chat, abajo. */
+const MARGEN_ABAJO = 44
+/** Los chips de los dos rivales, a los costados. */
+const MARGEN_LADOS = 56
 
 /* Referencias estables: van en las dependencias de los hooks de la mano y del
    tablero, y un `[]` nuevo en cada render los dispararía sin parar. */
 const SIN_FICHAS: BoardTile[] = []
 const SIN_MANO: HandTile[] = []
+const SIN_JUGADAS: RecentMove[] = []
 
 type ScoreCard = {
   name: string
@@ -175,39 +209,49 @@ function FichasReveladas({ state }: { state: GameState }) {
  * que volver a tener señal es un fetch y nada más.
  */
 /**
- * Uno de los otros tres, en su lado de la mesa. `estrecho` es para los de los
- * costados, que solo tienen unos 50px: ahí el nombre va debajo y recortado.
+ * Uno de los otros tres, en su lado de la mesa: la pareja al frente y los
+ * rivales a los costados. Van ENCIMA del paño, así que el chip es compacto —
+ * cada píxel que ocupe se lo quita a la cadena.
  */
 function Jugador({
   p,
   esPareja,
   caido,
-  estrecho,
   destacado,
+  paso,
+  turno,
+  desfase,
 }: {
   p: SeatInfo
   esPareja: boolean
   caido: boolean
-  estrecho: boolean
   /** Acaba de poner una ficha: el chip destella para que se sepa de quién fue. */
   destacado: boolean
+  /** Le acaba de tocar pasar. */
+  paso: boolean
+  /** `turn_started_at` si tiene el turno; null si no. */
+  turno: string | null
+  desfase: number
 }) {
-  const etiqueta = p.is_bot ? ' · bot' : esPareja ? ' · pareja' : ''
   return (
     <div className={[
       s.rival,
-      estrecho ? s.rivalLado : '',
       p.is_turn ? s.rivalActive : '',
       destacado ? s.rivalJugo : '',
+      paso ? s.rivalPaso : '',
     ].join(' ')}>
-      <Avatar name={p.display_name} size={estrecho ? 30 : 34} variant={esPareja ? 'gold' : 'neutral'} />
-      <span className={s.rivalName}>{estrecho ? p.display_name : `${p.display_name}${etiqueta}`}</span>
-      {/* En el chip estrecho no cabe "· bot" al lado del nombre, pero saber
-          quién es máquina importa: va como etiqueta propia. */}
-      {estrecho && p.is_bot && <span className={s.rivalBot}>bot</span>}
+      <div className={s.rivalCara}>
+        <Avatar name={p.display_name} size={30} variant={esPareja ? 'gold' : 'neutral'} />
+        {turno && <RelojTurno desde={turno} desfase={desfase} size={30} />}
+      </div>
+      <span className={s.rivalName}>{p.display_name}</span>
+      {/* En el chip no cabe "· bot" al lado del nombre, pero saber quién es
+          máquina importa: va como etiqueta propia. */}
+      {p.is_bot && <span className={s.rivalBot}>bot</span>}
       <span className={`${s.rivalMeta} ${p.is_turn ? s.rivalMetaActive : ''} ${caido ? s.rivalOff : ''}`}>
-        {caido ? 'sin señal' : estrecho ? p.tiles_left : `${p.tiles_left} fichas`}
+        {caido ? 'sin señal' : p.tiles_left}
       </span>
+      {paso && <span className={s.cartelPaso}>pasó</span>}
     </div>
   )
 }
@@ -258,7 +302,7 @@ function EsperandoJugador({
   const ahora = useLatido(true)
   const segundos = segundosSinSeñal(jugador.last_seen_at, ahora + desfase)
   const restan = segundos === null ? null : Math.max(0, UMBRAL_ANULAR_S - segundos)
-  const sePuedeAnular = segundos !== null && segundos >= UMBRAL_ANULAR_S
+  const sePuedeAnular = segundos !== null && segundos >= UMBRAL_ANULAR_S + MARGEN_RELOJ_S
   const quien = jugador.display_name ?? 'El de turno'
 
   if (compacto) {
@@ -301,25 +345,24 @@ function EsperandoJugador({
 }
 
 /**
- * Por dónde queda libre el extremo de la cadena en esa ficha. La ficha del codo
- * está de canto: entra por arriba y sale por abajo, que es por donde sigue la
- * fila siguiente.
+ * Por dónde queda libre el extremo de la cadena en esa ficha. Es el lado por el
+ * que la cadena habría seguido si hubiera más fichas.
  */
 function bordeLibre(p: Pieza, cual: 'entrada' | 'salida') {
-  if (p.codo) return cual === 'entrada' ? 'arriba' : 'abajo'
-  if (cual === 'entrada') return p.sentido === 1 ? 'izquierda' : 'derecha'
-  return p.sentido === 1 ? 'derecha' : 'izquierda'
+  const haciaDelante = cual === 'salida'
+  // `sentido` es hacia dónde caminó el tendido; la entrada mira al revés.
+  const s = haciaDelante ? p.sentido : ({
+    abajo: 'arriba', arriba: 'abajo', izquierda: 'derecha', derecha: 'izquierda',
+  } as const)[p.sentido]
+  return s
 }
 
 /**
  * La cadena en el paño.
  *
- * Cada ficha va colocada por su coordenada, no por `flex-wrap`. Antes eran filas
- * de flex alternando el sentido y **el giro no cuadraba**: como el reparto es
- * codicioso, a cada fila le sobra un trozo distinto, así que la par pegaba a la
- * izquierda y la impar a la derecha y el punto de unión bailaba hasta un ancho
- * de ficha. Ahí se perdía la seguidilla. Ahora el giro lo hace una ficha puesta
- * de canto y la fila siguiente arranca pegada a su borde: la unión se ve.
+ * Cada ficha va colocada por su coordenada, no por `flex-wrap`. La salida ancla
+ * el centro y de ahí salen dos brazos; cuando uno llega al borde, dobla y sigue
+ * en paralelo. Todo eso lo decide `tenderCadena`; aquí solo se pinta.
  */
 function Tablero({
   board,
@@ -375,9 +418,9 @@ function Tablero({
                 viva ? s.piezaViva : '',
                 entra ? s.piezaEntra : '',
               ].join(' ')}
-              data-fila={p.fila}
-              data-sentido={p.sentido}
-              data-codo={p.codo ? '1' : undefined}
+              data-tramo={p.tramo}
+              data-dir={p.sentido}
+              data-esquina={p.esquina ? '1' : undefined}
               data-punta={punta ?? undefined}
               data-lado={entra ? ladoEntrada : undefined}
               style={{ transform: `translate(${p.x}px, ${p.y}px)`, width: p.ancho, height: p.alto }}
@@ -392,7 +435,7 @@ function Tablero({
                 <span
                   className={`${s.puntaBadge} ${s['punta_' + bordeLibre(p, punta === 'l' ? 'entrada' : 'salida')]}`}
                 >
-                  {punta === 'l' ? `◀ ${visibles[0].a}` : `${visibles[visibles.length - 1].b} ▶`}
+                  {punta === 'l' ? `${visibles[0].a}` : `${visibles[visibles.length - 1].b}`}
                 </span>
               )}
               {entra && autor && <span className={s.autor}>{autor}</span>}
@@ -614,7 +657,10 @@ export function Mesa() {
   const [medirTablero, cajaTablero] = useTamano<HTMLDivElement>()
   const [medirMano, cajaMano] = useTamano<HTMLDivElement>()
 
-  const cadena = useCadenaVisible(state?.hand?.id ?? null, state?.board ?? SIN_FICHAS)
+  const cadena = useColaDeJugadas(
+    state?.hand?.id ?? null, state?.board ?? SIN_FICHAS, state?.recent_moves ?? SIN_JUGADAS,
+  )
+  const ultimaJugada = cadena.ultima
   const mano = useMano(state?.hand?.id ?? null, state?.my_hand ?? SIN_MANO)
 
   useEffect(() => {
@@ -643,6 +689,18 @@ export function Mesa() {
     && state.hand.current_seat !== null
     && state.hand.current_seat !== state.me.seat
     && !state.seats[state.hand.current_seat].connected
+
+  /*
+   * El pase es automático y hasta ahora no se notaba: te saltaban y te
+   * enterabas por una línea de texto en una esquina. Ahora vibra.
+   *
+   * `navigator.vibrate` NO existe en iPhone, así que en iPhone lo único que
+   * queda es el cartel — por eso el cartel no es opcional.
+   */
+  const pasoPropio = ultimaJugada?.tipo === 'pass' && ultimaJugada.seat === state?.me.seat
+  useEffect(() => {
+    if (pasoPropio) vibrar(120)
+  }, [pasoPropio])
 
   useEffect(() => {
     if (!esperandoSinSeñal) return
@@ -693,24 +751,37 @@ export function Mesa() {
   // scroll cuando el hueco cambia (se abre el chat, entra un aviso, gira el
   // teléfono). Mientras no haya medida se usa la estimación de siempre.
   const dobles = board.map((t) => isDouble(t.tile))
-  const anchoUtil = cajaTablero.ancho - AIRE_TABLERO * 2
-  const tileSize = tamanoTablero(
-    dobles,
-    { ancho: anchoUtil, alto: cajaTablero.alto - AIRE_TABLERO * 2 },
-    HUECO_TABLERO,
-  )
+  // La ficha de salida ancla el centro. Es la del `board_position` 0: el resto
+  // crece hacia los dos lados desde ella.
+  const iSalida = Math.max(0, board.findIndex((t) => t.position === 0))
+  /*
+   * La caja donde se tiende la cadena se mete hacia dentro lo que ocupan los
+   * chips de los jugadores, que ahora van ENCIMA del paño: así la cadena no
+   * pasa por debajo de una cara.
+   */
+  const cajaCadena = {
+    ancho: Math.max(1, cajaTablero.ancho - AIRE_TABLERO * 2 - MARGEN_LADOS * 2),
+    alto: Math.max(1, cajaTablero.alto - AIRE_TABLERO * 2 - MARGEN_ARRIBA - MARGEN_ABAJO),
+  }
+  const tileSize = tamanoTablero(dobles, iSalida, cajaCadena, HUECO_TABLERO)
   /*
    * El acomodo se calcula sobre el tablero ENTERO, no sobre lo que ya se ve.
    * Mientras se reproduce una ráfaga de bots eso deja las fichas ya puestas
    * quietas en su sitio; si se recalculara con cada revelado, la cadena entera
    * se reacomodaría tres veces seguidas y quedaría temblando.
    */
-  const acomodo = acomodarCadena(dobles, tileSize, Math.max(1, anchoUtil), HUECO_TABLERO)
+  const acomodo = tenderCadena(dobles, iSalida, tileSize, cajaCadena, HUECO_TABLERO)
   const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, FICHA_MANO_MAX)
 
-  const jugoAhora = cadena.entrando?.seat ?? null
-  const ladoEntrada = ladoDelAsiento(me.seat, cadena.entrando?.seat ?? 0)
-  const autorEntrada = cadena.entrando ? seats[cadena.entrando.seat]?.display_name ?? null : null
+  const puso = cadena.ultima?.tipo === 'play' ? cadena.ultima : null
+  const jugoAhora = puso?.seat ?? null
+  const ladoEntrada = ladoDelAsiento(me.seat, puso?.seat ?? 0)
+  const autorEntrada = puso ? seats[puso.seat]?.display_name ?? null : null
+  const pasoDe = (asiento: Seat) => cadena.ultima?.tipo === 'pass' && cadena.ultima.seat === asiento
+  // El que juega justo después de ti. Que ÉL pase es mérito tuyo: le dejaste
+  // dos puntas que no tiene.
+  const elQueSigue = me.seat === null ? null : (((me.seat + 1) % 4) as Seat)
+  const ahogaste = elQueSigue !== null && pasoDe(elQueSigue)
 
   const sinSeñal = hacerSinSeñal(presentes, me.profile_id)
   const enTurno = hand.current_seat !== null ? seats[hand.current_seat] : null
@@ -785,7 +856,11 @@ export function Mesa() {
   }
 
   return (
-    <div className={s.screen}>
+    <div className={`${s.screen} ${ahogaste ? s.ahogaste : ''}`}>
+      {/* Ahogaste al que juega después de ti: no tenía ninguna de las dos
+          puntas. Es una buena noticia, así que se celebra en verde y sin
+          vibrar — vibrar es para lo que te pasa a ti. */}
+      {ahogaste && <div className={s.verde} aria-hidden />}
       <div className={s.top}>
         <button className={s.back} onClick={() => navigate(`/sala/${code}`)}>←</button>
         <span
@@ -828,26 +903,14 @@ export function Mesa() {
           />
         )}
 
-        <div className={s.arriba}>
-          <Jugador
-            p={pareja}
-            esPareja
-            caido={sinSeñal(pareja)}
-            estrecho={false}
-            destacado={jugoAhora === pareja.seat}
-          />
-        </div>
-
-        <div className={s.centro}>
-          <Jugador
-            p={aLaIzquierda}
-            esPareja={false}
-            caido={sinSeñal(aLaIzquierda)}
-            estrecho
-            destacado={jugoAhora === aLaIzquierda.seat}
-          />
-
-          <div className={s.felt} ref={medirTablero}>
+        {/*
+          * El paño se queda con la pantalla entera. Los tres jugadores van
+          * ENCIMA, pegados a sus bordes —la pareja al frente, los rivales a los
+          * costados, como antes— y el chat flota en una esquina. Tenerlos al
+          * lado costaba ~104px de ancho y una franja de alto, que es justo lo
+          * que ahogaba la cadena.
+          */}
+        <div className={s.felt} ref={medirTablero}>
           {cadena.visibles.length === 0 ? (
             <div className={s.feltEmpty}>Mesa limpia</div>
           ) : (
@@ -857,42 +920,83 @@ export function Mesa() {
               piezas={acomodo.piezas}
               caja={{ ancho: acomodo.ancho, alto: acomodo.alto }}
               tileSize={tileSize}
-              entrando={cadena.entrando?.position ?? null}
+              entrando={puso?.position ?? null}
               autor={autorEntrada}
               ladoEntrada={ladoEntrada}
               puntaViva={puntaResaltada ?? (pending ? 'ambas' : null)}
             />
           )}
+
+          <div className={s.arriba}>
+            <Jugador
+              p={pareja}
+              esPareja
+              caido={sinSeñal(pareja)}
+              destacado={jugoAhora === pareja.seat}
+              paso={pasoDe(pareja.seat)}
+              turno={hand.current_seat === pareja.seat ? hand.turn_started_at : null}
+              desfase={desfase}
+            />
+          </div>
+          <div className={`${s.lado} ${s.ladoIzq}`}>
+            <Jugador
+              p={aLaIzquierda}
+              esPareja={false}
+              caido={sinSeñal(aLaIzquierda)}
+              destacado={jugoAhora === aLaIzquierda.seat}
+              paso={pasoDe(aLaIzquierda.seat)}
+              turno={hand.current_seat === aLaIzquierda.seat ? hand.turn_started_at : null}
+              desfase={desfase}
+            />
+          </div>
+          <div className={`${s.lado} ${s.ladoDer}`}>
+            <Jugador
+              p={aLaDerecha}
+              esPareja={false}
+              caido={sinSeñal(aLaDerecha)}
+              destacado={jugoAhora === aLaDerecha.seat}
+              paso={pasoDe(aLaDerecha.seat)}
+              turno={hand.current_seat === aLaDerecha.seat ? hand.turn_started_at : null}
+              desfase={desfase}
+            />
+          </div>
+
           <div className={s.ends}>
             Puntas {hand.left_end === null ? '—' : `${hand.left_end} · ${hand.right_end}`}
           </div>
           {passLine && <div className={s.passLine}>{passLine}</div>}
+
+          <div className={s.chatFlotante}>
+            <Chat
+              mensajes={chat.mensajes}
+              desfase={chat.desfase}
+              error={chat.error}
+              enviando={chat.enviando}
+              onEnviar={chat.enviar}
+            />
           </div>
-
-          <Jugador
-            p={aLaDerecha}
-            esPareja={false}
-            caido={sinSeñal(aLaDerecha)}
-            estrecho
-            destacado={jugoAhora === aLaDerecha.seat}
-          />
         </div>
-
-        <Chat
-          mensajes={chat.mensajes}
-          desfase={chat.desfase}
-          error={chat.error}
-          enviando={chat.enviando}
-          onEnviar={chat.enviar}
-        />
       </div>
 
       <div className={s.bottom}>
         <div className={`${s.turnRow} ${jugoAhora === me.seat ? s.turnRowJugo : ''}`}>
-          {meRow && <Avatar name={meRow.display_name} size={32} ring={myTurn ? 'var(--gold)' : 'rgba(242,234,216,.15)'} />}
-          <span className={`${s.turnLabel} ${myTurn ? s.turnMine : ''}`}>{turnLabel}</span>
+          {meRow && (
+            <div className={s.miCara}>
+              <Avatar name={meRow.display_name} size={32} ring={myTurn ? 'var(--gold)' : 'rgba(242,234,216,.15)'} />
+              {myTurn && <RelojTurno desde={hand.turn_started_at} desfase={desfase} size={32} />}
+            </div>
+          )}
+          <span className={`${s.turnLabel} ${myTurn ? s.turnMine : ''}`}>
+            {turnLabel}
+            {!handOver && hand.current_seat !== null && (
+              <span className={s.turnSegundos}>
+                <SegundosTurno desde={hand.turn_started_at} desfase={desfase} />
+              </span>
+            )}
+          </span>
         </div>
 
+        {pasoPropio && <div className={s.pasaste}>Te tocó pasar</div>}
         {playError && <div className={s.error}>{playError}</div>}
 
         {pending && (
