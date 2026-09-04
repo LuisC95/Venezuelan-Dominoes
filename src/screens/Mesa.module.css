@@ -72,6 +72,13 @@
 }
 .rivalLado .rivalMeta { font-family: var(--font-display); font-size: 15px; letter-spacing: 0; }
 .rivalActive { background: rgba(227, 178, 60, .12); border-color: var(--gold); }
+/* Acaba de poner una ficha. Va junto con la ficha entrando desde su lado: una
+   cosa dice de dónde vino y la otra de quién fue. */
+.rivalJugo { animation: om-jugo .7s ease-out; }
+@keyframes om-jugo {
+  0% { background: rgba(227, 178, 60, .45); border-color: var(--gold-soft); transform: scale(1.06); }
+  100% { background: var(--surface-soft); border-color: rgba(242, 234, 216, .08); transform: none; }
+}
 .rivalName {
   font-weight: 500; font-size: 11px; line-height: 1; color: var(--ivory-soft);
   white-space: nowrap; max-width: 86px; overflow: hidden; text-overflow: ellipsis;
@@ -99,17 +106,93 @@
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
 }
-.boardInner {
-  width: 100%; height: 100%;
-  display: flex; flex-direction: column;
-  align-items: stretch; justify-content: center;
-}
 /*
- * Cada línea se empaqueta contra su lado de arranque (flex-start, que en una
- * fila invertida es la derecha). Así la última ficha de una línea y la primera
- * de la siguiente quedan una encima de otra y la cadena se sigue leyendo.
+ * La caja justa que ocupa la cadena, centrada en el paño. Cada ficha se coloca
+ * por su coordenada (ver `acomodarCadena`): con `flex-wrap` el punto donde la
+ * cadena giraba de línea no cuadraba —a cada fila le sobra un trozo distinto—
+ * y la seguidilla se perdía. Ahora el giro lo hace una ficha puesta de canto.
  */
-.boardRow { display: flex; align-items: center; justify-content: flex-start; }
+.boardInner { position: relative; flex: 0 0 auto; }
+.pieza {
+  position: absolute; top: 0; left: 0;
+  /* Al entrar una ficha la cadena entera se reacomoda (a veces encoge de
+     tamaño): que las demás se deslicen en vez de saltar es lo que deja seguir
+     el hilo con la vista. */
+  transition: transform .28s ease;
+  border-radius: 4px;
+}
+.piezaCuerpo { width: 100%; height: 100%; }
+
+/* --- las dos puntas de juego --- */
+.piezaPunta { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(227, 178, 60, .45); }
+/* La punta que se está a punto de elegir en el pie: parpadea para que no haya
+   duda de cuál de las dos es "Punta 3". */
+.piezaViva {
+  box-shadow: 0 0 0 3px var(--gold-soft), 0 0 22px rgba(240, 194, 78, .75);
+  animation: om-punta .7s ease-in-out infinite;
+}
+.puntaBadge {
+  position: absolute; z-index: 3;
+  padding: 2px 5px; border-radius: var(--r-pill);
+  background: var(--gold-grad); color: var(--ink);
+  font-family: var(--font-display); font-size: 10px; line-height: 1.2;
+  white-space: nowrap; pointer-events: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .45);
+}
+/* Pegado al borde LIBRE de la ficha, montado a medias sobre ella: el aire del
+   paño (AIRE_TABLERO en Mesa.tsx) es justo lo que necesita para salir. */
+.punta_izquierda { right: 100%; top: 50%; transform: translate(50%, -50%); }
+.punta_derecha { left: 100%; top: 50%; transform: translate(-50%, -50%); }
+.punta_arriba { bottom: 100%; left: 50%; transform: translate(-50%, 50%); }
+.punta_abajo { top: 100%; left: 50%; transform: translate(-50%, -50%); }
+
+/* --- la ficha recién jugada --- */
+/* Entra desde el lado de quien la puso: tu pareja al frente, los rivales a los
+   costados, tú desde abajo. Es lo que dice de un vistazo quién jugó. */
+/* El nombre lo pone el lado: siempre hay uno, `ladoDelAsiento` no devuelve nulo. */
+.piezaEntra .piezaCuerpo { animation-duration: .26s; animation-timing-function: ease-out; animation-fill-mode: both; }
+.piezaEntra[data-lado='abajo'] .piezaCuerpo { animation-name: om-entra-abajo; }
+.piezaEntra[data-lado='arriba'] .piezaCuerpo { animation-name: om-entra-arriba; }
+.piezaEntra[data-lado='izquierda'] .piezaCuerpo { animation-name: om-entra-izquierda; }
+.piezaEntra[data-lado='derecha'] .piezaCuerpo { animation-name: om-entra-derecha; }
+.autor {
+  position: absolute; z-index: 4;
+  bottom: 100%; left: 50%;
+  margin-bottom: 3px;
+  padding: 2px 6px; border-radius: var(--r-pill);
+  background: rgba(11, 16, 32, .92); border: 1px solid var(--line-gold);
+  color: var(--gold); font-weight: 500; font-size: 9px; line-height: 1.3;
+  letter-spacing: .1em; text-transform: uppercase;
+  white-space: nowrap; pointer-events: none;
+  animation: om-autor 1.4s ease-out both;
+}
+
+@keyframes om-punta {
+  0%, 100% { box-shadow: 0 0 0 3px var(--gold-soft), 0 0 22px rgba(240, 194, 78, .75); }
+  50% { box-shadow: 0 0 0 3px var(--gold-soft), 0 0 6px rgba(240, 194, 78, .25); }
+}
+@keyframes om-entra-abajo {
+  from { opacity: 0; transform: translateY(42px) scale(.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes om-entra-arriba {
+  from { opacity: 0; transform: translateY(-42px) scale(.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes om-entra-izquierda {
+  from { opacity: 0; transform: translateX(-42px) scale(.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes om-entra-derecha {
+  from { opacity: 0; transform: translateX(42px) scale(.9); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes om-autor {
+  0% { opacity: 0; transform: translate(-50%, 4px); }
+  15%, 65% { opacity: 1; transform: translate(-50%, 0); }
+  100% { opacity: 0; transform: translate(-50%, -4px); }
+}
+
 .feltEmpty {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
@@ -119,7 +202,7 @@
 .ends {
   position: absolute; left: 10px; top: 10px;
   font-weight: 500; font-size: 9px; letter-spacing: .16em; text-transform: uppercase;
-  color: rgba(242, 234, 216, .5);
+  color: rgba(242, 234, 216, .32);
 }
 .passLine {
   position: absolute; right: 10px; bottom: 10px;
@@ -134,7 +217,8 @@
   border-top: 1px solid rgba(242, 234, 216, .08);
   background: rgba(11, 16, 32, .6);
 }
-.turnRow { display: flex; align-items: center; gap: 10px; }
+.turnRow { display: flex; align-items: center; gap: 10px; border-radius: var(--r-sm); }
+.turnRowJugo { animation: om-jugo .7s ease-out; }
 .turnLabel {
   flex: 1; font-weight: 500; font-size: 12px; line-height: 1.3;
   letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
@@ -145,15 +229,35 @@
 .punta {
   padding: 10px 16px; border: 1px solid var(--gold); border-radius: var(--r-sm);
   color: var(--gold); font-weight: 500; font-size: 12px; line-height: 1; letter-spacing: .1em;
+  transition: background .16s, color .16s;
 }
+/* Mientras se señala este botón, esa punta parpadea en el tablero. El rótulo
+   dice el número; el tablero dice cuál de los dos extremos es. */
+.puntaViva { background: var(--gold-grad); color: var(--ink); }
 .cancel { padding: 10px; color: var(--muted-2); font-size: 12px; letter-spacing: .1em; }
 
 /* El hueco y el padding los pone Mesa.tsx: son parte del cálculo del tamaño. */
 .hand { display: flex; padding: 4px 0 8px; align-items: flex-end; justify-content: center; }
+/*
+ * El envoltorio es quien escucha los gestos (toque = jugar, arrastre = ordenar,
+ * pulsación larga = voltear). No puede escucharlos el botón: ordenar y voltear
+ * tienen que funcionar cuando NO es tu turno, y ahí va `disabled`, que se come
+ * los eventos de puntero.
+ */
+.slot {
+  flex: 0 0 auto; position: relative; touch-action: none;
+  transition: transform .14s ease;
+}
+.slotArrastrada { transition: none; }
+.slotArrastrada .tile { transform: translateY(-14px) scale(1.06); filter: drop-shadow(0 10px 18px rgba(0, 0, 0, .55)); }
 .tile {
   flex: 0 0 auto; border-radius: 12px;
   background: transparent; transition: transform .16s;
+  /* Los gestos son del envoltorio; el botón sigue existiendo para el teclado. */
+  pointer-events: none;
 }
+/* Voltear una ficha es solo cómo la ves tú: se pinta con `top`/`bottom` al
+   revés y al servidor va igual, en formato canónico. No lleva clase propia. */
 .tilePlayable {
   background: linear-gradient(140deg, rgba(227, 178, 60, .85), rgba(227, 178, 60, .25));
   transform: translateY(-6px);
@@ -389,4 +493,18 @@
   .finScreen { gap: 16px; justify-content: flex-start; }
   .finHeadline { font-size: 34px; }
   .finBigNumber { font-size: 64px; }
+}
+
+
+/*
+ * Quien pide menos movimiento no debería perder información: se quitan los
+ * desplazamientos, pero el halo de las puntas y el destello del chip se quedan,
+ * porque son los que dicen dónde se juega y quién jugó.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .pieza, .slot { transition: none; }
+  .piezaEntra .piezaCuerpo { animation: om-aparece .2s ease-out both; }
+  .piezaViva { animation: none; }
+  .autor { animation: om-autor 1.4s steps(1, end) both; }
+  @keyframes om-aparece { from { opacity: 0 } to { opacity: 1 } }
 }

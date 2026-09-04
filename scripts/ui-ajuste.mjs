@@ -65,28 +65,63 @@ function medirComo(el, ancho, alto) {
 const px = (v) => Number.parseFloat(String(v).replace('px', '')) || 0
 
 /**
- * Las filas que la app pintó, con los px que le puso a cada ficha. Se leen del
- * DOM en vez de volver a simular el reparto: así se comprueba lo que se ve, no
- * una copia del cálculo.
+ * Las fichas que la app pintó, con la posición y los px que les puso. Se leen
+ * del DOM en vez de volver a simular el acomodo: así se comprueba lo que se ve,
+ * no una copia del cálculo.
+ *
+ * Ya no son filas de flex: cada ficha va colocada por su coordenada, y el giro
+ * de línea lo hace una ficha puesta de canto (`data-codo`).
  */
-function filasDelTablero() {
+function fichasDelTablero() {
   const inner = doc.querySelector('[class*="boardInner"]')
   if (!inner) return []
-  return [...inner.children].map((fila) => ({
-    invertida: fila.style.flexDirection === 'row-reverse',
-    fichas: [...fila.children].map((f) => ({ ancho: px(f.style.width), alto: px(f.style.height) })),
-  }))
+  return [...inner.children].map((el) => {
+    const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(el.style.transform)
+    return {
+      fila: Number(el.dataset.fila),
+      sentido: Number(el.dataset.sentido),
+      codo: el.dataset.codo === '1',
+      punta: el.dataset.punta ?? null,
+      x: Number(m?.[1] ?? 0),
+      y: Number(m?.[2] ?? 0),
+      ancho: px(el.style.width),
+      alto: px(el.style.height),
+    }
+  })
 }
 
-const fichasDelTablero = () => filasDelTablero().flatMap((f) => f.fichas)
+/** La caja que ocupa la cadena entera. */
+function cajaDeCadena(fichas) {
+  return {
+    ancho: Math.max(...fichas.map((f) => f.x + f.ancho)) - Math.min(...fichas.map((f) => f.x)),
+    alto: Math.max(...fichas.map((f) => f.y + f.alto)) - Math.min(...fichas.map((f) => f.y)),
+  }
+}
 
-/** Lo que ocupa cada fila y el alto total, sumando huecos. */
-function medirFilas(filas, gap) {
-  const anchos = filas.map((f) =>
-    f.fichas.reduce((a, x) => a + x.ancho, 0) + gap * Math.max(0, f.fichas.length - 1))
-  const altos = filas.map((f) => Math.max(0, ...f.fichas.map((x) => x.alto)))
-  const alto = altos.reduce((a, b) => a + b, 0) + gap * Math.max(0, filas.length - 1)
-  return { anchos, alto }
+const filasDe = (fichas) => [...new Set(fichas.map((f) => f.fila))].sort((a, b) => a - b)
+
+/**
+ * El giro cuadra: la primera ficha de una fila arranca justo en el borde por
+ * donde salió el codo de la fila anterior.
+ *
+ * Es la comprobación que antes no existía y que faltaba: con `flex-wrap` las
+ * dos filas pegaban a lados distintos y el punto de unión se corría hasta un
+ * ancho de ficha, que es lo que hacía perder la seguidilla jugando.
+ */
+function codoDescuadrado(fichas) {
+  const filas = filasDe(fichas)
+  for (let k = 1; k < filas.length; k++) {
+    const previa = fichas.filter((f) => f.fila === filas[k - 1])
+    const actual = fichas.filter((f) => f.fila === filas[k])
+    const codo = previa.at(-1)
+    if (!codo.codo) continue
+    const borde = codo.sentido === 1 ? codo.x + codo.ancho : codo.x
+    const arranque = actual[0].sentido === 1 ? actual[0].x : actual[0].x + actual[0].ancho
+    if (Math.abs(borde - arranque) > 1) {
+      return `fila ${filas[k]}: el codo sale en ${borde} y la fila arranca en ${arranque}`
+    }
+  }
+  return null
 }
 
 // --- montar una partida ---------------------------------------------------
@@ -115,9 +150,9 @@ const leer = async () => (await otros[0].sb.rpc('get_game_state', { p_match_id: 
 
 // --- la mano propia -------------------------------------------------------
 r.head('Tu mano, con las 7 fichas')
-// OJO: [class*="hand"] también casa con .handNo de la barra superior. El
-// contenedor bueno es el padre de los botones de ficha.
-const mano = doc.querySelector('button[class*="tile"]').parentElement
+// [class*="hand"] también casaría con .handNo de la barra superior, y el padre
+// del botón es ahora el envoltorio que escucha los gestos. La mano se marca.
+const mano = doc.querySelector('[data-mano]')
 r.check('hay 7 fichas repartidas', doc.querySelectorAll('button[class*="tile"]').length === 7)
 
 for (const ancho of [320, 360, 430]) {
@@ -191,29 +226,48 @@ while (st.hand.status === 'active' && guard++ < 200) {
     remedir()
     await wait(60)
 
-    const filas = filasDelTablero()
-    const fichas = filas.flatMap((f) => f.fichas)
+    const fichas = fichasDelTablero()
     if (fichas.length === 0) continue
     masFichas = Math.max(masFichas, fichas.length)
 
     const disponible = { ancho: caja.ancho - AIRE_TABLERO * 2, alto: caja.alto - AIRE_TABLERO * 2 }
-    const { anchos, alto } = medirFilas(filas, HUECO_TABLERO)
-    const masAncha = Math.max(...anchos)
+    const ocupa = cajaDeCadena(fichas)
 
-    if (masAncha > disponible.ancho || alto > disponible.alto) {
+    if (ocupa.ancho > disponible.ancho || ocupa.alto > disponible.alto) {
       r.check(`cabe con ${fichas.length} fichas en ${caja.nombre}`, false,
-        `alto ${alto}/${disponible.alto}, fila más ancha ${masAncha}/${disponible.ancho}`)
+        `${ocupa.ancho}×${ocupa.alto} en ${disponible.ancho}×${disponible.alto}`)
       revisiones = -1
       break
     }
 
     // La cadena tiene que serpentear: si dos filas seguidas van en el mismo
     // sentido, la continuación aparece al otro extremo y se pierde el hilo.
-    if (filas.some((f, k) => f.invertida !== (k % 2 === 1))) {
-      r.check('las filas alternan de sentido', false, filas.map((f) => (f.invertida ? '←' : '→')).join(''))
+    const filas = filasDe(fichas)
+    const sentidos = filas.map((n) => fichas.find((f) => f.fila === n).sentido)
+    if (sentidos.some((s, k) => s !== (k % 2 === 1 ? -1 : 1))) {
+      r.check('las filas alternan de sentido', false,
+        sentidos.map((s) => (s === 1 ? '→' : '←')).join(''))
       revisiones = -1
       break
     }
+
+    // Y el giro tiene que cuadrar, que es lo que hace que se siga con la vista.
+    const descuadre = codoDescuadrado(fichas)
+    if (descuadre) {
+      r.check('el codo cuadra con la fila siguiente', false, descuadre)
+      revisiones = -1
+      break
+    }
+
+    // Las dos puntas de juego, marcadas: una al principio de la cadena y otra
+    // al final, ni más ni menos.
+    const puntas = fichas.filter((f) => f.punta).map((f) => f.punta).join('')
+    if (fichas.length > 1 && puntas !== 'lr') {
+      r.check('las dos puntas están marcadas en el tablero', false, `puntas: "${puntas}"`)
+      revisiones = -1
+      break
+    }
+
     if (fichas.length !== st.board.length) {
       r.check('las filas llevan todas las fichas y ninguna de más', false,
         `${fichas.length} pintadas / ${st.board.length} en el servidor`)
@@ -236,13 +290,13 @@ while (st.hand.status === 'active' && guard++ < 200) {
       fichasEntonces = fichas.length
     }
 
-    peorHolgura = Math.min(peorHolgura, disponible.alto - alto)
+    peorHolgura = Math.min(peorHolgura, disponible.alto - ocupa.alto)
     revisiones++
   }
   if (revisiones < 0) break
 }
 
-r.check('la cadena cupo, serpenteó y no perdió fichas en ninguna jugada ni caja',
+r.check('la cadena cupo, serpenteó con el codo cuadrado y no perdió fichas',
   revisiones > 0, `${revisiones} comprobaciones, hasta ${masFichas} fichas, holgura mínima ${peorHolgura}px`)
 
 console.log(`  la más pequeña que se llegó a pintar: ${ladoMinimo}px de lado largo` +

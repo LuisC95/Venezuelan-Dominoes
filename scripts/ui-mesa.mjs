@@ -121,6 +121,81 @@ if (siguiente && /Siguiente mano/.test(siguiente.textContent)) {
     () => doc.querySelectorAll('button[class*="tile"]').length === 7))
 }
 
+
+/*
+ * Los tres gestos de la mano. Se prueban en la mano 2, ya repartida y con las
+ * siete fichas puestas: aquí lo que importa no es el juego sino que tocar,
+ * arrastrar y mantener pulsado hagan tres cosas distintas.
+ */
+r.head('Ordenar y voltear tu propia mano')
+
+const { window: win } = app
+/** El envoltorio que escucha los gestos: el botón va `disabled` y no los recibe. */
+const slots = () => [...doc.querySelectorAll('[data-mano] > *')]
+/** Cómo se ve cada ficha ahora mismo: "arriba-abajo", en el orden de la mano. */
+/* Cada mitad de la ficha es una rejilla de 9 huecos y entre las dos hay un
+   divisor, que no es una mitad: se distinguen por tener 9 hijos. */
+const leerFicha = (sl) => {
+  const mitades = [...(sl.querySelector('button > div')?.children ?? [])]
+    .filter((h) => h.children.length === 9)
+  return mitades.map((m) => [...m.children].filter((h) => h.children.length).length).join('-')
+}
+const pintadas = () => slots().map(leerFicha)
+
+const puntero = (el, tipo, x, y) => el.dispatchEvent(
+  new win.PointerEvent(tipo, { bubbles: true, clientX: x, clientY: y, pointerId: 1 }),
+)
+
+const antesDeOrdenar = pintadas()
+r.check('la mano se lee entera', antesDeOrdenar.length === 7, antesDeOrdenar.join(' '))
+
+// --- arrastrar: la primera ficha se va al tercer puesto ---
+const paso = 60
+const primera = slots()[0]
+puntero(primera, 'pointerdown', 0, 0)
+puntero(primera, 'pointermove', paso * 2, 0)
+puntero(primera, 'pointerup', paso * 2, 0)
+await wait(120)
+const trasArrastrar = pintadas()
+r.check('arrastrar cambia el orden de la mano',
+  trasArrastrar.join(' ') !== antesDeOrdenar.join(' ')
+  && trasArrastrar.includes(antesDeOrdenar[0]),
+  `${antesDeOrdenar.join(' ')} → ${trasArrastrar.join(' ')}`)
+r.check('arrastrar no juega la ficha', doc.querySelectorAll('[data-mano] > *').length === 7)
+
+// --- pulsación larga: la ficha se voltea ---
+// Un doble no sirve de prueba: se ve igual del derecho que del revés.
+const iVoltear = pintadas().findIndex((f) => f.split('-')[0] !== f.split('-')[1])
+const objetivo = slots()[iVoltear]
+const antesDeVoltear = pintadas()[iVoltear]
+puntero(objetivo, 'pointerdown', 0, 0)
+await wait(650)
+puntero(objetivo, 'pointerup', 0, 0)
+await wait(120)
+const trasVoltear = pintadas()[iVoltear]
+const alReves = antesDeVoltear.split('-').reverse().join('-')
+r.check('mantener pulsado voltea la ficha', trasVoltear === alReves,
+  `${antesDeVoltear} → ${trasVoltear}`)
+r.check('voltear tampoco la juega', doc.querySelectorAll('[data-mano] > *').length === 7)
+
+// --- y todo eso sobrevive a recargar ---
+const guardado = win.localStorage.getItem('domino.mano.' + (await leer()).hand.id)
+r.check('el orden y el volteo quedan guardados por mano', !!guardado, guardado ?? '')
+const orden = pintadas()
+
+const manoId = (await leer()).hand.id
+const app2 = await bootApp({
+  as: 'Rafa',
+  url: `http://localhost:4173/sala/${code}/mesa`,
+  seed: { ['domino.mano.' + manoId]: guardado },
+})
+await app2.until('la mesa otra vez', () => /Puntas|Mesa limpia/.test(app2.text()))
+const pintadas2 = () => [...app2.doc.querySelectorAll('[data-mano] > *')].map(leerFicha)
+await app2.until('las 7 fichas', () => pintadas2().length === 7)
+r.check('al recargar, la mano sigue como la dejaste',
+  pintadas2().join(' ') === orden.join(' '), `${orden.join(' ')} vs ${pintadas2().join(' ')}`)
+app2.window.close()
+
 saveBrowserSession(app.window, 'Rafa')
 app.window.close()
 r.done('sala de prueba: ' + code)

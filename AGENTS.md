@@ -119,8 +119,8 @@ app/                          este repo
 │   │   ├── tiles.ts          utilidades de fichas — ESPEJO, no autoridad
 │   │   ├── state.ts          tipos exactos de get_game_state / get_room_state
 │   │   └── view.ts           cálculos de presentación y acomodo de la mesa
-│   ├── hooks/                useAuth, useRoom, useGameState, useAccion,
-│   │                         useLatido, useMensajes, useTamano
+│   ├── hooks/                useAuth, useRoom, useGameState, useAccion, useLatido,
+│   │                         useMensajes, useTamano, useCadenaVisible, useMano
 │   ├── lib/                  supabase.ts (cliente), api.ts (RPCs tipadas)
 │   ├── screens/              Inicio, Lobby, Mesa, Cola, FinPartida, Perfil
 │   │                         (+ un .module.css cada una)
@@ -257,12 +257,12 @@ node scripts/bench-bots.mjs   # torneo contra juego al azar — la vara para toc
 npm run build
 npx vite preview --port 4173 &
 node scripts/ui-check.mjs     # inicio → crear sala → lobby que se actualiza solo
-node scripts/ui-mesa.mjs      # la mesa: tocar fichas y ver jugar a los otros en vivo
+node scripts/ui-mesa.mjs      # la mesa: tocar fichas, ver jugar a los otros, ordenar la mano
 node scripts/ui-cola.mjs      # cola, sueltos, fin de partida y rey de la cancha
 node scripts/ui-reconexion.mjs # overlay de reconexión y anular mano trabada
 node scripts/ui-chat.mjs      # emotes, chat en vivo y freno del servidor
 node scripts/ui-perfil.mjs    # historial, estadísticas y pareja frecuente
-node scripts/ui-ajuste.mjs    # que las fichas quepan sin scroll, jugada a jugada
+node scripts/ui-ajuste.mjs    # que quepan sin scroll y que el codo cuadre, jugada a jugada
 node scripts/ui-bots.mjs      # rellenar la mesa con bots desde el lobby
 ```
 
@@ -340,6 +340,14 @@ Seis cosas que costaron tiempo. No las repitas.
    El test que lo cubre (`ui-reconexion.mjs`) pulsa el botón **en cuanto la app
    lo ofrece**, sin esperar el umbral por su cuenta: es la única forma de que un
    adelanto de la cuenta haga fallar la prueba en vez de pasar desapercibido.
+
+   **Y la medida caduca.** `desfase` se toma en cada fetch, pero mientras se
+   espera a alguien sin señal no llega ni un evento —`heartbeat` es un `update`
+   pelado, no avisa por el canal—, así que la cuenta corría contra una medida de
+   hace un minuto. Medido: el botón se llegó a ofrecer con la cuenta **0,9s
+   adelantada** y `void_hand` lo rechazaba. La mesa **relee cada 10s mientras
+   espera**, que además es lo único que la entera de que el jugador volvió.
+   Si añades otra espera larga sin eventos, acuérdate de refrescar dentro.
 
 Además, al escribir pruebas contra la UI: **espera a que el DOM refleje el
 cambio**, no a que el servidor lo tenga. Leer el estado desde otro cliente y
@@ -493,21 +501,86 @@ Tres cosas que hay que respetar si se toca esto:
    corto como `round(size / 2)`: un lado largo impar se redondea hacia arriba y
    cada ficha se pasa medio píxel — con siete en la mano, 3px de scroll.
 
-### La cadena serpentea
+### La cadena serpentea, y el giro cuadra
 
 Que quepa no basta: con `flex-wrap` normal, la ficha que sigue a la última de
 una línea aparecía al otro extremo de la pantalla y **se perdía la seguidilla**
-(lo reportó el usuario jugando). Por eso el tablero ya no es un `flex-wrap`:
-`filasDeCadena` devuelve los índices de cada línea y la mesa las pinta una por
-una, **alternando el sentido** (`row-reverse` en las impares). Así la
-continuación queda justo debajo.
+(lo reportó el usuario jugando). El primer arreglo fue pintar las filas por
+separado alternando el sentido, pero **eso tampoco bastaba**: el reparto en
+filas es codicioso, así que a cada fila le sobra un trozo distinto, la par
+pegaba a la izquierda y la impar a la derecha, y el punto de unión se corría
+hasta un ancho de ficha. Desordenado otra vez, y sin saber cuál era cada punta.
 
-Dos detalles que van juntos y se rompen por separado:
+Ahora la cadena **no es flex**: `acomodarCadena` (en `game/view.ts`) recorre las
+fichas y devuelve la posición exacta de cada una, y la mesa las coloca por
+coordenada. El giro lo hace **una ficha puesta de canto**, como en una mesa de
+verdad: la última de la fila se gira 90° y la fila siguiente arranca pegada a su
+borde exterior. La unión cuadra por construcción, no por suerte.
 
-- En una fila invertida **la ficha también se espeja** (`top`/`bottom` al revés),
-  o los números dejan de casar con el vecino.
-- Cada fila se empaqueta con `justify-content: flex-start`, que en una fila
-  invertida es la derecha. Centrarlas descolocaría el punto de unión.
+Tres cosas que hay que respetar si se toca esto:
+
+- **La entrada y la salida de cada ficha son `a` y `b`**, siempre. De ahí sale
+  la regla de pintado entera: tramo hacia la derecha `top=a, bottom=b`; hacia la
+  izquierda al revés (`espejo`); y **el codo siempre `top=a, bottom=b`**, porque
+  entra por arriba y sale por abajo, que es por donde sigue la fila de abajo.
+- **Un doble va de canto en el tramo y acostado en el codo**: es la ficha girada
+  90° respecto a por dónde va la cadena, no una orientación fija.
+- El codo hace que su fila mida `size` de alto en vez de `size/2`, pero también
+  ocupa menos ancho, así que **cabe una ficha más por fila**. Medido: el acomodo
+  nuevo nunca sale más alto que el viejo, y el peor caso del arnés sigue en 23px.
+
+### Las puntas se ven
+
+El rótulo `Puntas 3 · 5` de la esquina no decía **cuál** era cuál. Ahora las dos
+fichas de los extremos llevan halo dorado y un badge con su número pegado al
+borde libre, y los botones `◀ Punta 3` / `Punta 5 ▶` del pie **resaltan su punta
+en el tablero** al señalarlos. El badge se monta a medias sobre la ficha y sale
+hacia fuera: ese es el sitio para el que se subió `AIRE_TABLERO` a 12px.
+
+Los números del badge salen de **lo que se está viendo**, no de
+`hand.left_end` / `right_end`: mientras se reproduce una ráfaga de bots el
+tablero va unas fichas por detrás del servidor.
+
+### Se ve quién puso cada ficha
+
+`board[i]` traía `seat` y `played_order` desde siempre y la UI no los miraba.
+Ahora la ficha nueva **entra desde el lado de quien la jugó** (tu pareja al
+frente, los rivales a los costados, tú desde abajo — la misma vuelta horaria de
+`otherSeats`, en `ladoDelAsiento`), el chip de esa persona destella y su nombre
+aparece un instante junto a la ficha.
+
+Y como **los bots juegan dentro de la misma transacción** que el humano, dos o
+tres jugadas llegaban en un solo refresco y aparecían todas a la vez.
+`useCadenaVisible` las encola y las suelta **una cada 500ms**. Dos detalles:
+
+- Se cuenta por `played_order`, **no por posición en el array**: `board` va
+  ordenado por `board_position` y una jugada por la izquierda se mete al
+  principio, así que quedarse con "las primeras N" enseñaría la ficha nueva y
+  escondería la del otro extremo.
+- El acomodo se calcula sobre el tablero **entero**, no sobre lo visible: si no,
+  la cadena se reacomodaría con cada revelado y quedaría temblando.
+
+Es solo presentación. El estado bueno sigue siendo el del servidor; como mucho
+el tablero va medio segundo por detrás.
+
+### Tu mano: ordenarla y voltearla
+
+Cosa tuya y de nadie más: el servidor manda `my_hand` en su orden y no sabe nada
+de esto. Tres gestos, en `ManoPropia`:
+
+| toque corto | jugar |
+| pulsar y mover (>8px) | ordenar |
+| mantener pulsado 450ms | voltear la ficha 180° |
+
+El volteo se lleva la pulsación larga porque los otros dos gestos ya estaban
+cogidos. Y **ordenar y voltear funcionan aunque no sea tu turno** —es cuando más
+falta hace—, así que el `<button disabled>` lleva `pointer-events: none` y los
+gestos viven en el envoltorio: el `disabled` se queda donde tiene que estar.
+
+El destino del arrastre vive en el **ref**, no en el estado: soltar enseguida
+después de mover ejecuta las dos cosas en el mismo tick y React todavía no se ha
+enterado. Se guarda por mano en `localStorage` (`domino.mano.<hand_id>`) y se
+reconcilia contra `my_hand`, que es la autoridad de qué fichas te quedan.
 
 ### Cada quien en su lado
 

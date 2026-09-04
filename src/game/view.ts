@@ -15,6 +15,16 @@ export function partnerSeat(mySeat: Seat): Seat {
 }
 
 /**
+ * De qué lado de la pantalla está un asiento, visto desde el tuyo. Es la misma
+ * vuelta horaria de `otherSeats`, y es lo que dice desde dónde entra volando una
+ * ficha recién jugada. Sin asiento propio —un observador— todo llega de arriba.
+ */
+export function ladoDelAsiento(mySeat: Seat | null, seat: Seat): 'abajo' | 'izquierda' | 'arriba' | 'derecha' {
+  if (mySeat === null) return 'arriba'
+  return (['abajo', 'izquierda', 'arriba', 'derecha'] as const)[(seat - mySeat + 4) % 4]
+}
+
+/**
  * Estimación de emergencia mientras no se ha medido el tablero (primer render,
  * o un entorno sin layout como jsdom). El tamaño bueno lo da `tamanoTablero`.
  */
@@ -37,43 +47,120 @@ export function medidaFicha(size: number, doble: boolean): { ancho: number; alto
   return doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto }
 }
 
-/** Una línea de la cadena: qué fichas lleva y cuánto ocupa. */
-export type FilaCadena = { desde: number; hasta: number; ancho: number; alto: number }
-
-/**
- * Reparte la cadena en líneas, igual que haría `flex-wrap`.
- *
- * Se simula en vez de estimarse porque los dobles miden distinto: contar
- * "fichas por fila" daría de más justo en las manos con muchos dobles, que son
- * las que peor caben. Y como devuelve los índices, es también lo que usa la
- * mesa para pintar cada línea por separado y hacerlas serpentear.
- */
-export function filasDeCadena(dobles: boolean[], size: number, ancho: number, gap: number): FilaCadena[] {
-  const filas: FilaCadena[] = []
-  let fila: FilaCadena | null = null
-
-  for (let i = 0; i < dobles.length; i++) {
-    const m = medidaFicha(size, dobles[i])
-    if (fila && fila.ancho + gap + m.ancho > ancho) {
-      filas.push(fila)
-      fila = null
-    }
-    if (!fila) {
-      fila = { desde: i, hasta: i, ancho: m.ancho, alto: m.alto }
-    } else {
-      fila.hasta = i
-      fila.ancho += gap + m.ancho
-      fila.alto = Math.max(fila.alto, m.alto)
-    }
-  }
-  if (fila) filas.push(fila)
-  return filas
+/** Dónde y cómo va pintada una ficha del tablero. */
+export type Pieza = {
+  /** Índice en `board`. */
+  i: number
+  /** Esquina superior izquierda dentro del acomodo, en px. */
+  x: number
+  y: number
+  ancho: number
+  alto: number
+  /** Si la `Ficha` se pinta parada (lado largo vertical). */
+  vertical: boolean
+  /** Tramo que va hacia la izquierda: los pips van intercambiados. */
+  espejo: boolean
+  /** La ficha del giro, girada 90° respecto a su tramo. */
+  codo: boolean
+  fila: number
+  /** +1 el tramo avanza hacia la derecha, -1 hacia la izquierda. */
+  sentido: 1 | -1
 }
 
-/** Alto total de la cadena, con los huecos entre filas. */
-export function altoDeCadena(filas: FilaCadena[], gap: number): number {
-  if (filas.length === 0) return 0
-  return filas.reduce((a, f) => a + f.alto, 0) + gap * (filas.length - 1)
+export type Acomodo = { piezas: Pieza[]; ancho: number; alto: number }
+
+/**
+ * Reparte la cadena por el paño, serpenteando, y devuelve la posición exacta de
+ * cada ficha.
+ *
+ * Antes esto eran filas de `flex-wrap` alternando el sentido, y el giro **no
+ * cuadraba**: el reparto es codicioso, así que a cada fila le sobra un trozo
+ * distinto, y la fila par pegaba a la izquierda mientras la impar pegaba a la
+ * derecha. El punto de unión se corría hasta un ancho de ficha y la seguidilla
+ * se perdía — es lo que el usuario reportó jugando.
+ *
+ * Aquí el giro lo hace una ficha **puesta de canto**, como en una mesa de
+ * verdad: la última de la fila se gira 90° y la fila siguiente arranca pegada a
+ * su borde exterior. Así la unión cuadra por construcción, no por suerte.
+ */
+export function acomodarCadena(dobles: boolean[], size: number, ancho: number, gap: number): Acomodo {
+  const corto = Math.round(size / 2)
+  // En el tramo, la normal va acostada y el doble de canto. En el codo, al revés.
+  const enTramo = (doble: boolean) => (doble ? { ancho: corto, alto: size } : { ancho: size, alto: corto })
+  const enCodo = (doble: boolean) => (doble ? { ancho: size, alto: corto } : { ancho: corto, alto: size })
+
+  const piezas: Pieza[] = []
+  let sentido: 1 | -1 = 1
+  // Borde por donde avanza la cadena: el derecho si va hacia la derecha.
+  let borde = 0
+  let fila = 0
+  let y = 0
+  let altoFila = 0
+  let primeraDeFila = true
+
+  /** Hueco que queda por delante en esta fila. */
+  const libre = () => (sentido === 1 ? ancho - borde : borde)
+
+  const colocar = (i: number, m: { ancho: number; alto: number }, codo: boolean) => {
+    const sep = primeraDeFila ? 0 : gap
+    const x = sentido === 1 ? borde + sep : borde - sep - m.ancho
+    piezas.push({
+      i, x, y, ancho: m.ancho, alto: m.alto,
+      vertical: codo ? !dobles[i] : dobles[i],
+      espejo: sentido === -1 && !codo,
+      codo, fila, sentido,
+    })
+    borde = sentido === 1 ? x + m.ancho : x
+    altoFila = Math.max(altoFila, m.alto)
+    primeraDeFila = false
+  }
+
+  const girar = () => {
+    y += altoFila + gap
+    fila++
+    altoFila = 0
+    sentido = (sentido === 1 ? -1 : 1) as 1 | -1
+    primeraDeFila = true
+    // `borde` no se toca: la fila nueva arranca justo donde terminó el codo, que
+    // es lo que hace que la ficha de abajo quede debajo de él.
+  }
+
+  for (let i = 0; i < dobles.length; i++) {
+    const tramo = enTramo(dobles[i])
+    const sep = primeraDeFila ? 0 : gap
+    if (libre() >= sep + tramo.ancho) {
+      colocar(i, tramo, false)
+      continue
+    }
+    const codo = enCodo(dobles[i])
+    if (!primeraDeFila && libre() >= gap + codo.ancho) {
+      // Cabe de canto: esta es la ficha del giro.
+      colocar(i, codo, true)
+      girar()
+      continue
+    }
+    // Ni de canto cabe (fila recién abierta en un paño angustiosamente estrecho):
+    // se cierra la fila y la ficha abre la siguiente, como hacía el flex-wrap.
+    if (primeraDeFila) {
+      colocar(i, tramo, false)
+      continue
+    }
+    girar()
+    // Tras girar, el borde es el mismo; la fila nueva empieza con esta ficha.
+    colocar(i, enTramo(dobles[i]), false)
+  }
+
+  if (piezas.length === 0) return { piezas, ancho: 0, alto: 0 }
+  // Si la última ficha fue un codo, `girar()` ya abrió una fila que nadie usó:
+  // su hueco no cuenta para el alto.
+  const alto = altoFila > 0 ? y + altoFila : y - gap
+
+  // Se normaliza a un origen en 0,0: el acomodo puede haber caminado hacia la
+  // izquierda del arranque y lo que le importa a la mesa es la caja que ocupa.
+  const minX = Math.min(...piezas.map((p) => p.x))
+  const maxX = Math.max(...piezas.map((p) => p.x + p.ancho))
+  for (const p of piezas) p.x -= minX
+  return { piezas, ancho: maxX - minX, alto }
 }
 
 /**
@@ -91,8 +178,8 @@ export function tamanoTablero(dobles: boolean[], caja: Caja, gap: number): numbe
   for (let size = FICHA_MAX; size > FICHA_MIN; size--) {
     // Una ficha normal mide `size` de ancho: más ancha que la caja no cabe ni sola.
     if (size > caja.ancho) continue
-    const filas = filasDeCadena(dobles, size, caja.ancho, gap)
-    if (altoDeCadena(filas, gap) <= caja.alto) return size
+    const acomodo = acomodarCadena(dobles, size, caja.ancho, gap)
+    if (acomodo.alto <= caja.alto && acomodo.ancho <= caja.ancho) return size
   }
   return FICHA_MIN
 }

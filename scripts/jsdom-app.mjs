@@ -12,7 +12,7 @@ import { readCache } from './players.mjs'
 
 export { env, makePlayer, reporter, saveBrowserSession } from './players.mjs'
 
-export async function bootApp({ url = 'http://localhost:4173/', as = 'Rafa', quiet = true } = {}) {
+export async function bootApp({ url = 'http://localhost:4173/', as = 'Rafa', quiet = true, seed = {} } = {}) {
   const vc = new VirtualConsole()
   vc.on('jsdomError', (e) => { if (!quiet) console.log('  [jsdom]', e.message) })
   vc.on('error', (...a) => console.log('  [app error]', ...a.map(String)))
@@ -32,6 +32,10 @@ export async function bootApp({ url = 'http://localhost:4173/', as = 'Rafa', qui
   if (cached?.session) {
     window.localStorage.setItem('domino.auth', JSON.stringify(cached.session))
   }
+  // Cada jsdom trae su propio localStorage, así que lo que la app guardó en otra
+  // pestaña —el orden de tu mano, por ejemplo— hay que sembrarlo a mano para
+  // poder comprobar que sobrevive a recargar.
+  for (const [k, v] of Object.entries(seed)) window.localStorage.setItem(k, v)
 
   const bundle = readdirSync('dist/assets').find((f) => /^index-.*\.js$/.test(f))
   window.eval(

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type React from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useRoom } from '../hooks/useRoom'
 import { useGameState } from '../hooks/useGameState'
@@ -12,10 +13,16 @@ import { useLatido } from '../hooks/useLatido'
 import { useTamano } from '../hooks/useTamano'
 import { useMensajes } from '../hooks/useMensajes'
 import {
-  filasDeCadena, hacerSinSeñal, otherSeats, segundosSinSeñal, tamanoMano, tamanoTablero,
-  teamNames, trailingPasses,
+  acomodarCadena, hacerSinSeñal, ladoDelAsiento, otherSeats, segundosSinSeñal, tamanoMano,
+  tamanoTablero, teamNames, trailingPasses,
 } from '../game/view'
-import type { GameState, HandEndType, SeatInfo, TeamIndex } from '../game/state'
+import type { Pieza } from '../game/view'
+import { useCadenaVisible } from '../hooks/useCadenaVisible'
+import { useMano } from '../hooks/useMano'
+import type { FichaMano } from '../hooks/useMano'
+import type {
+  BoardTile, GameState, HandEndType, HandTile, SeatInfo, TeamIndex,
+} from '../game/state'
 import s from './Mesa.module.css'
 
 /** Los mismos 60s que exige void_hand en el servidor. */
@@ -28,14 +35,23 @@ const UMBRAL_ANULAR_S = 60
  */
 /** Hueco entre fichas del tablero. */
 const HUECO_TABLERO = 3
-/** Margen que se deja alrededor de la cadena para que no toque el borde. */
-const AIRE_TABLERO = 10
+/**
+ * Margen alrededor de la cadena. Ya no es solo para que no toque el borde: los
+ * badges de punta se montan a medias sobre la ficha del extremo y salen hacia
+ * fuera, y este es el aire que tienen para hacerlo.
+ */
+const AIRE_TABLERO = 12
 /** Hueco entre las fichas de tu mano. */
 const HUECO_MANO = 8
 /** Lo que el botón añade alrededor de cada ficha de la mano. */
 const AIRE_MANO = 3
 /** Tu mano no crece más que esto aunque sobre sitio. */
 const FICHA_MANO_MAX = 104
+
+/* Referencias estables: van en las dependencias de los hooks de la mano y del
+   tablero, y un `[]` nuevo en cada render los dispararía sin parar. */
+const SIN_FICHAS: BoardTile[] = []
+const SIN_MANO: HandTile[] = []
 
 type ScoreCard = {
   name: string
@@ -167,15 +183,23 @@ function Jugador({
   esPareja,
   caido,
   estrecho,
+  destacado,
 }: {
   p: SeatInfo
   esPareja: boolean
   caido: boolean
   estrecho: boolean
+  /** Acaba de poner una ficha: el chip destella para que se sepa de quién fue. */
+  destacado: boolean
 }) {
   const etiqueta = p.is_bot ? ' · bot' : esPareja ? ' · pareja' : ''
   return (
-    <div className={`${s.rival} ${estrecho ? s.rivalLado : ''} ${p.is_turn ? s.rivalActive : ''}`}>
+    <div className={[
+      s.rival,
+      estrecho ? s.rivalLado : '',
+      p.is_turn ? s.rivalActive : '',
+      destacado ? s.rivalJugo : '',
+    ].join(' ')}>
       <Avatar name={p.display_name} size={estrecho ? 30 : 34} variant={esPareja ? 'gold' : 'neutral'} />
       <span className={s.rivalName}>{estrecho ? p.display_name : `${p.display_name}${etiqueta}`}</span>
       {/* En el chip estrecho no cabe "· bot" al lado del nombre, pero saber
@@ -276,6 +300,110 @@ function EsperandoJugador({
   )
 }
 
+/**
+ * Por dónde queda libre el extremo de la cadena en esa ficha. La ficha del codo
+ * está de canto: entra por arriba y sale por abajo, que es por donde sigue la
+ * fila siguiente.
+ */
+function bordeLibre(p: Pieza, cual: 'entrada' | 'salida') {
+  if (p.codo) return cual === 'entrada' ? 'arriba' : 'abajo'
+  if (cual === 'entrada') return p.sentido === 1 ? 'izquierda' : 'derecha'
+  return p.sentido === 1 ? 'derecha' : 'izquierda'
+}
+
+/**
+ * La cadena en el paño.
+ *
+ * Cada ficha va colocada por su coordenada, no por `flex-wrap`. Antes eran filas
+ * de flex alternando el sentido y **el giro no cuadraba**: como el reparto es
+ * codicioso, a cada fila le sobra un trozo distinto, así que la par pegaba a la
+ * izquierda y la impar a la derecha y el punto de unión bailaba hasta un ancho
+ * de ficha. Ahí se perdía la seguidilla. Ahora el giro lo hace una ficha puesta
+ * de canto y la fila siguiente arranca pegada a su borde: la unión se ve.
+ */
+function Tablero({
+  board,
+  visibles,
+  piezas,
+  caja,
+  tileSize,
+  entrando,
+  autor,
+  ladoEntrada,
+  puntaViva,
+}: {
+  board: BoardTile[]
+  visibles: BoardTile[]
+  piezas: Pieza[]
+  caja: { ancho: number; alto: number }
+  tileSize: number
+  /** `position` de la ficha recién puesta, si hay una entrando. */
+  entrando: number | null
+  autor: string | null
+  ladoEntrada: 'abajo' | 'izquierda' | 'arriba' | 'derecha'
+  /** Qué punta resaltar: la que el jugador está a punto de elegir, o las dos. */
+  puntaViva: Side | 'ambas' | null
+}) {
+  /*
+   * Las puntas se leen de lo que se está VIENDO, no de `hand.left_end`:
+   * mientras se reproduce una ráfaga de bots el tablero va unas fichas por
+   * detrás, y el número del badge tiene que ser el de la ficha que se ve.
+   *
+   * Lo visible es siempre un tramo seguido de la cadena —crece por los dos
+   * extremos desde la salida—, así que basta con dónde empieza y dónde acaba.
+   */
+  const desde = board.indexOf(visibles[0])
+  const hasta = desde + visibles.length - 1
+
+  return (
+    <div className={s.board} data-tablero style={{ padding: AIRE_TABLERO }}>
+      <div className={s.boardInner} style={{ width: caja.ancho, height: caja.alto }}>
+        {piezas.map((p) => {
+          if (p.i < desde || p.i > hasta) return null
+          const t = board[p.i]
+          const [top, bottom] = p.espejo ? [t.b, t.a] : [t.a, t.b]
+          const punta: Side | null = p.i === desde ? 'l' : p.i === hasta ? 'r' : null
+          const viva = punta !== null && (puntaViva === 'ambas' || puntaViva === punta)
+          const entra = t.position === entrando
+
+          return (
+            <div
+              key={t.position}
+              className={[
+                s.pieza,
+                punta ? s.piezaPunta : '',
+                viva ? s.piezaViva : '',
+                entra ? s.piezaEntra : '',
+              ].join(' ')}
+              data-fila={p.fila}
+              data-sentido={p.sentido}
+              data-codo={p.codo ? '1' : undefined}
+              data-punta={punta ?? undefined}
+              data-lado={entra ? ladoEntrada : undefined}
+              style={{ transform: `translate(${p.x}px, ${p.y}px)`, width: p.ancho, height: p.alto }}
+            >
+              {/* El cuerpo va aparte porque la animación de entrada es un
+                  `transform`, y el del envoltorio es lo que la coloca en el
+                  paño: en el mismo elemento, la entrada la mandaría al origen. */}
+              <div className={s.piezaCuerpo}>
+                <Ficha top={top} bottom={bottom} size={tileSize} vertical={p.vertical} />
+              </div>
+              {punta && (
+                <span
+                  className={`${s.puntaBadge} ${s['punta_' + bordeLibre(p, punta === 'l' ? 'entrada' : 'salida')]}`}
+                >
+                  {punta === 'l' ? `◀ ${visibles[0].a}` : `${visibles[visibles.length - 1].b} ▶`}
+                </span>
+              )}
+              {entra && autor && <span className={s.autor}>{autor}</span>}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function FinDeMano({
   state,
   roomCode,
@@ -316,6 +444,155 @@ function FinDeMano({
   )
 }
 
+/** Cuánto hay que arrastrar para que deje de ser un toque y pase a ser mover. */
+const UMBRAL_ARRASTRE = 8
+/** Cuánto hay que mantener pulsado, sin moverse, para voltear la ficha. */
+const PULSACION_LARGA_MS = 450
+
+type Arrastre = { desde: number; hasta: number; dx: number }
+
+/**
+ * Tu mano, con los tres gestos.
+ *
+ * | toque corto            | jugar   |
+ * | pulsar y mover (>8px)  | ordenar |
+ * | mantener pulsado 450ms | voltear |
+ *
+ * El volteo se lleva la pulsación larga porque los otros dos gestos ya estaban
+ * cogidos, y así no hace falta un "modo ordenar" que separe las dos cosas.
+ *
+ * Ordenar y voltear funcionan **también cuando no es tu turno** —es cuando más
+ * falta hace, mientras esperas—, y ahí las fichas van `disabled`, que mata los
+ * eventos de puntero. Por eso el botón lleva `pointer-events: none` y los gestos
+ * viven en el envoltorio: el `disabled` se queda donde tiene que estar, para el
+ * teclado y para quien lea el DOM.
+ */
+function ManoPropia({
+  fichas,
+  size,
+  medir,
+  puedeJugar,
+  onJugar,
+  onVoltear,
+  onMover,
+}: {
+  fichas: FichaMano[]
+  size: number
+  medir: (el: HTMLDivElement | null) => void
+  puedeJugar: boolean
+  onJugar: (tile: Tile, sides: Side[]) => void
+  onVoltear: (tile: Tile) => void
+  onMover: (desde: number, hasta: number) => void
+}) {
+  const [arrastre, setArrastre] = useState<Arrastre | null>(null)
+  // El gesto en curso. Va en un ref porque cambia en cada `pointermove` y
+  // re-renderizar la mano entera a 60fps por eso no tiene sentido.
+  const gesto = useRef<
+    { x: number; y: number; desde: number; hasta: number; movido: boolean; volteada: boolean } | null
+  >(null)
+  const reloj = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Todas las fichas de la mano miden lo mismo, así que el paso de una posición
+  // a la siguiente es una constante y no hay que medir el DOM para saber sobre
+  // cuál estás soltando.
+  const paso = Math.round(size / 2) + AIRE_MANO * 2 + HUECO_MANO
+
+  function soltar() {
+    if (reloj.current) { clearTimeout(reloj.current); reloj.current = null }
+    gesto.current = null
+  }
+
+  function alBajar(e: React.PointerEvent<HTMLDivElement>, i: number, tile: Tile) {
+    // Capturar el puntero es lo que deja seguir arrastrando cuando el dedo se
+    // sale de la ficha. jsdom no lo implementa y no pasa nada: es una mejora
+    // del arrastre, no un requisito.
+    e.currentTarget.setPointerCapture?.(e.pointerId)
+    gesto.current = { x: e.clientX, y: e.clientY, desde: i, hasta: i, movido: false, volteada: false }
+    reloj.current = setTimeout(() => {
+      if (!gesto.current || gesto.current.movido) return
+      gesto.current.volteada = true
+      onVoltear(tile)
+    }, PULSACION_LARGA_MS)
+  }
+
+  function alMover(e: React.PointerEvent<HTMLDivElement>) {
+    const g = gesto.current
+    if (!g) return
+    const dx = e.clientX - g.x
+    const dy = e.clientY - g.y
+    if (!g.movido) {
+      if (Math.hypot(dx, dy) < UMBRAL_ARRASTRE) return
+      // Ya es un arrastre: lo que fuera a pasar por quedarse quieto, no pasa.
+      g.movido = true
+      if (reloj.current) { clearTimeout(reloj.current); reloj.current = null }
+    }
+    const salto = Math.round(dx / paso)
+    g.hasta = Math.min(fichas.length - 1, Math.max(0, g.desde + salto))
+    setArrastre({ desde: g.desde, hasta: g.hasta, dx })
+  }
+
+  function alSubir(tile: Tile, sides: Side[]) {
+    const g = gesto.current
+    soltar()
+    if (!g) return
+    if (g.movido) {
+      // Del ref, no del estado: soltar enseguida después de mover ejecuta las
+      // dos cosas en el mismo tick y el estado todavía no se ha enterado.
+      onMover(g.desde, g.hasta)
+      setArrastre(null)
+      return
+    }
+    // Ni se movió ni llegó a voltearse: fue un toque, y un toque es jugar.
+    if (!g.volteada && puedeJugar) onJugar(tile, sides)
+  }
+
+  return (
+    <div className={s.hand} data-mano ref={medir} style={{ gap: HUECO_MANO }}>
+      {fichas.map((t, i) => {
+        const [a, b] = parseTile(t.tile)
+        const playable = puedeJugar && t.sides.length > 0
+        // Mientras arrastras, las que quedan entre el origen y el destino se
+        // corren un puesto para dejarle el hueco a la vista.
+        let corrimiento = 0
+        if (arrastre && i !== arrastre.desde) {
+          if (arrastre.desde < i && i <= arrastre.hasta) corrimiento = -paso
+          else if (arrastre.hasta <= i && i < arrastre.desde) corrimiento = paso
+        }
+        const arrastrada = arrastre?.desde === i
+
+        return (
+          <div
+            key={t.tile}
+            className={`${s.slot} ${arrastrada ? s.slotArrastrada : ''}`}
+            onPointerDown={(e) => alBajar(e, i, t.tile)}
+            onPointerMove={alMover}
+            onPointerUp={() => alSubir(t.tile, t.sides)}
+            onPointerCancel={() => { soltar(); setArrastre(null) }}
+            style={{
+              transform: `translateX(${arrastrada ? arrastre.dx : corrimiento}px)`,
+              zIndex: arrastrada ? 2 : 1,
+            }}
+          >
+            <button
+              className={[s.tile, playable ? s.tilePlayable : s.tileDead].join(' ')}
+              style={{ padding: AIRE_MANO }}
+              disabled={!playable}
+              onClick={() => onJugar(t.tile, t.sides)}
+            >
+              <Ficha
+                top={t.volteada ? b : a}
+                bottom={t.volteada ? a : b}
+                size={size}
+                vertical
+              />
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function Mesa() {
   const { code } = useParams<{ code: string }>()
   const navigate = useNavigate()
@@ -326,6 +603,9 @@ export function Mesa() {
 
   // Ficha que calza por las dos puntas: hay que preguntar por cuál.
   const [pending, setPending] = useState<Tile | null>(null)
+  // La punta que el jugador está a punto de elegir, para que parpadee en el
+  // tablero: el rótulo "Punta 3" no dice cuál de las dos es hasta que se ve.
+  const [puntaResaltada, setPuntaResaltada] = useState<Side | null>(null)
   const [busy, setBusy] = useState(false)
   const [playError, setPlayError] = useState<string | null>(null)
   // Mirar el tablero mientras se espera a alguien sin señal: la espera puede ser
@@ -334,10 +614,41 @@ export function Mesa() {
   const [medirTablero, cajaTablero] = useTamano<HTMLDivElement>()
   const [medirMano, cajaMano] = useTamano<HTMLDivElement>()
 
+  const cadena = useCadenaVisible(state?.hand?.id ?? null, state?.board ?? SIN_FICHAS)
+  const mano = useMano(state?.hand?.id ?? null, state?.my_hand ?? SIN_MANO)
+
   useEffect(() => {
     setPending(null)
+    setPuntaResaltada(null)
     setEspiando(false)
   }, [state?.hand?.move_count])
+
+  /*
+   * Mientras se espera a alguien sin señal, la mesa se queda sin noticias:
+   * `heartbeat` es un update pelado que no avisa por el canal, así que ni un
+   * evento entra en todo ese minuto. Eso tenía dos consecuencias malas:
+   *
+   * - si el jugador vuelve, la mesa no se entera y lo sigue dando por caído;
+   * - la cuenta de segundos corre contra el `desfase` medido en el último
+   *   fetch, cada vez más viejo. Medido aquí: el botón de anular llegó a
+   *   ofrecerse con la cuenta 0,9s ADELANTADA, y `void_hand` lo rechazaba con
+   *   "el jugador de turno sigue conectado". Es la trampa 6 otra vez, ahora por
+   *   antigüedad de la medida en vez de por usar el reloj del navegador.
+   *
+   * Releer cada 10s arregla las dos: es el patrón de siempre —el cliente
+   * vuelve a pedir el estado— y de paso vuelve a medir el desfase.
+   */
+  const esperandoSinSeñal =
+    state?.hand?.status === 'active'
+    && state.hand.current_seat !== null
+    && state.hand.current_seat !== state.me.seat
+    && !state.seats[state.hand.current_seat].connected
+
+  useEffect(() => {
+    if (!esperandoSinSeñal) return
+    const cada = setInterval(() => { refresh() }, 10000)
+    return () => clearInterval(cada)
+  }, [esperandoSinSeñal, refresh])
 
   if (roomStatus === 'joining' || (loading && !state)) {
     return (
@@ -388,12 +699,18 @@ export function Mesa() {
     { ancho: anchoUtil, alto: cajaTablero.alto - AIRE_TABLERO * 2 },
     HUECO_TABLERO,
   )
-  // La cadena se parte en líneas y cada una se pinta aparte para poder
-  // alternarles el sentido: si todas fueran de izquierda a derecha, la ficha que
-  // sigue a la última de una fila aparecería al otro extremo de la pantalla y la
-  // seguidilla se pierde. Serpenteando, la continuación queda justo debajo.
-  const filas = filasDeCadena(dobles, tileSize, Math.max(1, anchoUtil), HUECO_TABLERO)
+  /*
+   * El acomodo se calcula sobre el tablero ENTERO, no sobre lo que ya se ve.
+   * Mientras se reproduce una ráfaga de bots eso deja las fichas ya puestas
+   * quietas en su sitio; si se recalculara con cada revelado, la cadena entera
+   * se reacomodaría tres veces seguidas y quedaría temblando.
+   */
+  const acomodo = acomodarCadena(dobles, tileSize, Math.max(1, anchoUtil), HUECO_TABLERO)
   const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, FICHA_MANO_MAX)
+
+  const jugoAhora = cadena.entrando?.seat ?? null
+  const ladoEntrada = ladoDelAsiento(me.seat, cadena.entrando?.seat ?? 0)
+  const autorEntrada = cadena.entrando ? seats[cadena.entrando.seat]?.display_name ?? null : null
 
   const sinSeñal = hacerSinSeñal(presentes, me.profile_id)
   const enTurno = hand.current_seat !== null ? seats[hand.current_seat] : null
@@ -512,43 +829,39 @@ export function Mesa() {
         )}
 
         <div className={s.arriba}>
-          <Jugador p={pareja} esPareja caido={sinSeñal(pareja)} estrecho={false} />
+          <Jugador
+            p={pareja}
+            esPareja
+            caido={sinSeñal(pareja)}
+            estrecho={false}
+            destacado={jugoAhora === pareja.seat}
+          />
         </div>
 
         <div className={s.centro}>
-          <Jugador p={aLaIzquierda} esPareja={false} caido={sinSeñal(aLaIzquierda)} estrecho />
+          <Jugador
+            p={aLaIzquierda}
+            esPareja={false}
+            caido={sinSeñal(aLaIzquierda)}
+            estrecho
+            destacado={jugoAhora === aLaIzquierda.seat}
+          />
 
           <div className={s.felt} ref={medirTablero}>
-          {board.length === 0 ? (
+          {cadena.visibles.length === 0 ? (
             <div className={s.feltEmpty}>Mesa limpia</div>
           ) : (
-            <div className={s.board} style={{ padding: AIRE_TABLERO }}>
-              <div className={s.boardInner} style={{ gap: HUECO_TABLERO }}>
-                {filas.map((fila, i) => (
-                  <div
-                    key={fila.desde}
-                    className={s.boardRow}
-                    // Las impares van al revés: se leen de derecha a izquierda.
-                    style={{ gap: HUECO_TABLERO, flexDirection: i % 2 ? 'row-reverse' : 'row' }}
-                  >
-                    {board.slice(fila.desde, fila.hasta + 1).map((t) => {
-                      const alReves = i % 2 === 1
-                      return (
-                        <Ficha
-                          key={t.position}
-                          // En una fila invertida la ficha también se espeja, o
-                          // los números dejarían de casar con el vecino.
-                          top={alReves ? t.b : t.a}
-                          bottom={alReves ? t.a : t.b}
-                          size={tileSize}
-                          vertical={isDouble(t.tile)}
-                        />
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <Tablero
+              board={board}
+              visibles={cadena.visibles}
+              piezas={acomodo.piezas}
+              caja={{ ancho: acomodo.ancho, alto: acomodo.alto }}
+              tileSize={tileSize}
+              entrando={cadena.entrando?.position ?? null}
+              autor={autorEntrada}
+              ladoEntrada={ladoEntrada}
+              puntaViva={puntaResaltada ?? (pending ? 'ambas' : null)}
+            />
           )}
           <div className={s.ends}>
             Puntas {hand.left_end === null ? '—' : `${hand.left_end} · ${hand.right_end}`}
@@ -556,7 +869,13 @@ export function Mesa() {
           {passLine && <div className={s.passLine}>{passLine}</div>}
           </div>
 
-          <Jugador p={aLaDerecha} esPareja={false} caido={sinSeñal(aLaDerecha)} estrecho />
+          <Jugador
+            p={aLaDerecha}
+            esPareja={false}
+            caido={sinSeñal(aLaDerecha)}
+            estrecho
+            destacado={jugoAhora === aLaDerecha.seat}
+          />
         </div>
 
         <Chat
@@ -569,7 +888,7 @@ export function Mesa() {
       </div>
 
       <div className={s.bottom}>
-        <div className={s.turnRow}>
+        <div className={`${s.turnRow} ${jugoAhora === me.seat ? s.turnRowJugo : ''}`}>
           {meRow && <Avatar name={meRow.display_name} size={32} ring={myTurn ? 'var(--gold)' : 'rgba(242,234,216,.15)'} />}
           <span className={`${s.turnLabel} ${myTurn ? s.turnMine : ''}`}>{turnLabel}</span>
         </div>
@@ -578,10 +897,28 @@ export function Mesa() {
 
         {pending && (
           <div className={s.puntas}>
-            <button className={s.punta} disabled={busy} onClick={() => play(pending, 'l')}>
+            <button
+              className={`${s.punta} ${puntaResaltada === 'l' ? s.puntaViva : ''}`}
+              disabled={busy}
+              onClick={() => play(pending, 'l')}
+              onPointerEnter={() => setPuntaResaltada('l')}
+              onPointerDown={() => setPuntaResaltada('l')}
+              onPointerLeave={() => setPuntaResaltada(null)}
+              onFocus={() => setPuntaResaltada('l')}
+              onBlur={() => setPuntaResaltada(null)}
+            >
               ◀ Punta {hand.left_end}
             </button>
-            <button className={s.punta} disabled={busy} onClick={() => play(pending, 'r')}>
+            <button
+              className={`${s.punta} ${puntaResaltada === 'r' ? s.puntaViva : ''}`}
+              disabled={busy}
+              onClick={() => play(pending, 'r')}
+              onPointerEnter={() => setPuntaResaltada('r')}
+              onPointerDown={() => setPuntaResaltada('r')}
+              onPointerLeave={() => setPuntaResaltada(null)}
+              onFocus={() => setPuntaResaltada('r')}
+              onBlur={() => setPuntaResaltada(null)}
+            >
               Punta {hand.right_end} ▶
             </button>
             <button className={s.cancel} onClick={() => setPending(null)}>✕</button>
@@ -589,26 +926,15 @@ export function Mesa() {
         )}
 
         {iAmSeated ? (
-          <div className={s.hand} ref={medirMano} style={{ gap: HUECO_MANO }}>
-            {myHand.map((t) => {
-              const [a, b] = parseTile(t.tile)
-              const playable = myTurn && t.sides.length > 0 && !handOver
-              return (
-                <button
-                  key={t.tile}
-                  className={[
-                    s.tile,
-                    pending === t.tile ? s.tileChosen : playable ? s.tilePlayable : s.tileDead,
-                  ].join(' ')}
-                  style={{ padding: AIRE_MANO }}
-                  disabled={!playable || busy}
-                  onClick={() => tapTile(t.tile, t.sides)}
-                >
-                  <Ficha top={a} bottom={b} size={manoSize} vertical />
-                </button>
-              )
-            })}
-          </div>
+          <ManoPropia
+            fichas={mano.fichas}
+            size={manoSize}
+            medir={medirMano}
+            puedeJugar={myTurn && !busy && !handOver}
+            onJugar={tapTile}
+            onVoltear={mano.voltear}
+            onMover={mano.mover}
+          />
         ) : (
           <div className={s.turnLabel} style={{ textAlign: 'center' }}>Estás observando</div>
         )}
