@@ -90,15 +90,26 @@
 .vacio { color: var(--muted-2); font-size: 12px; line-height: 1.5; text-align: center; }
 
 /* --- fila de emotes --- */
+/*
+ * Una sola línea, siempre. Con `flex-wrap: wrap` los cinco botones se partían en
+ * dos filas en cualquier teléfono estrecho y el chat pasaba de 36 a 64px de
+ * alto — 28px que le robaba a la cadena, en la pantalla donde menos sobran.
+ * Si no caben, se arrastran de lado.
+ */
 .pills {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 1px;
 }
+.pills::-webkit-scrollbar { display: none; }
 .pill {
-  padding: 7px 12px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
   border: 1px solid rgba(242, 234, 216, .14);
   border-radius: var(--r-pill);
   color: var(--muted-4);

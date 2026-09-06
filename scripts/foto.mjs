@@ -22,9 +22,14 @@ const SALIDA = process.env.SALIDA ?? '/tmp/fotos-mesa'
  *  exactamente lo que ve un teléfono conectado por WiFi. */
 const BASE = process.env.BASE ?? 'http://localhost:4173'
 /** Un teléfono normal de pie, que es como se juega. */
-const PANTALLA = process.env.PANTALLA === 'pc'
-  ? { ancho: 1280, alto: 900, escala: 2, movil: false }
-  : { ancho: 390, alto: 844, escala: 3, movil: true }
+const PANTALLAS = {
+  // Un teléfono corto CON la barra del navegador a la vista: es el caso que se
+  // rompía, y el que ninguna emulación "de catálogo" reproduce.
+  corto: { ancho: 375, alto: 553, escala: 3, movil: true },
+  pc: { ancho: 1280, alto: 900, escala: 2, movil: false },
+  girado: { ancho: 844, alto: 390, escala: 3, movil: true },
+}
+const PANTALLA = PANTALLAS[process.env.PANTALLA ?? ''] ?? { ancho: 390, alto: 844, escala: 3, movil: true }
 
 mkdirSync(SALIDA, { recursive: true })
 

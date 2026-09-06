@@ -77,8 +77,11 @@ r.head('Se cae la conexión del de turno')
 let st = await leer()
 let empujones = 0
 while (st.hand.current_seat === 0 && empujones++ < 4) {
-  await until('el turno propio', () => /Tu turno/.test(text()), 10000)
-  const jugables = [...doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+  const tocable = () =>
+    [...doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+  // Se espera a que la mano esté TOCABLE, no solo a que diga "Tu turno".
+  await until('la mano tocable', () => /Tu turno/.test(text()) && tocable().length > 0, 10000)
+  const jugables = tocable()
   if (jugables.length === 0) break
   const antes = st.board.length
   click(jugables[0])

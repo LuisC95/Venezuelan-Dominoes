@@ -70,6 +70,17 @@ const AIRE_MANO = 3
 /** Tu mano no crece más que esto aunque sobre sitio. */
 const FICHA_MANO_MAX = 104
 /*
+ * Y tampoco más que esta parte de la pantalla.
+ *
+ * `tamanoMano` solo despejaba el ANCHO, así que con pocas fichas en mano se iban
+ * al tope de 104px: la barra de abajo se comía 191px —el 35% de un teléfono
+ * corto— y el tablero se quedaba sin alto. Al revés de lo que hace falta,
+ * porque es al final de la mano, con pocas fichas, cuando la cadena es más
+ * larga. En un teléfono alto no cambia nada; en uno corto le devuelve ~30px al
+ * paño, que es lo que decide si la cadena se tiende a lo largo o de lado.
+ */
+const PARTE_PANTALLA_MANO = 0.13
+/*
  * Lo que se le quita al paño para los jugadores y el chat, que van ENCIMA.
  *
  * **Se miden, no se estiman.** La primera versión llevaba tres números a ojo y
@@ -219,6 +230,7 @@ function Jugador({
   esPareja,
   caido,
   destacado,
+  acostado,
   paso,
   turno,
   desfase,
@@ -228,6 +240,8 @@ function Jugador({
   caido: boolean
   /** Acaba de poner una ficha: el chip destella para que se sepa de quién fue. */
   destacado: boolean
+  /** En fila en vez de en columna: el de arriba, donde el alto es oro. */
+  acostado?: boolean
   /** Le acaba de tocar pasar. */
   paso: boolean
   /** `turn_started_at` si tiene el turno; null si no. */
@@ -237,6 +251,7 @@ function Jugador({
   return (
     <div className={[
       s.rival,
+      acostado ? s.rivalAcostado : '',
       p.is_turn ? s.rivalActive : '',
       destacado ? s.rivalJugo : '',
       paso ? s.rivalPaso : '',
@@ -591,7 +606,15 @@ function ManoPropia({
   }
 
   return (
-    <div className={s.hand} data-mano ref={medir} style={{ gap: HUECO_MANO }}>
+    <div
+      className={s.hand}
+      data-mano
+      // Por qué la mano está o no jugable. Lo leen las pruebas: sin esto, una
+      // mano bloqueada y una mano sin jugada legal se ven igual desde fuera.
+      data-puede={puedeJugar ? '1' : '0'}
+      ref={medir}
+      style={{ gap: HUECO_MANO }}
+    >
       {fichas.map((t, i) => {
         const [a, b] = parseTile(t.tile)
         const playable = puedeJugar && t.sides.length > 0
@@ -655,6 +678,7 @@ export function Mesa() {
   // Mirar el tablero mientras se espera a alguien sin señal: la espera puede ser
   // larga y bloquear la pantalla entera no ayuda a nadie.
   const [espiando, setEspiando] = useState(false)
+  const [medirPantalla, cajaPantalla] = useTamano<HTMLDivElement>()
   const [medirTablero, cajaTablero] = useTamano<HTMLDivElement>()
   const [medirMano, cajaMano] = useTamano<HTMLDivElement>()
   // Lo que ocupan de verdad los chips y el chat sobre el paño.
@@ -790,7 +814,11 @@ export function Mesa() {
    * se reacomodaría tres veces seguidas y quedaría temblando.
    */
   const acomodo = tenderCadena(dobles, iSalida, tileSize, cajaCadena, HUECO_TABLERO)
-  const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, FICHA_MANO_MAX)
+  const topeMano = Math.max(48, Math.min(
+    FICHA_MANO_MAX,
+    Math.round((cajaPantalla.alto || 800) * PARTE_PANTALLA_MANO),
+  ))
+  const manoSize = tamanoMano(myHand.length, cajaMano.ancho, HUECO_MANO, AIRE_MANO, topeMano)
 
   const puso = cadena.ultima?.tipo === 'play' ? cadena.ultima : null
   const jugoAhora = puso?.seat ?? null
@@ -875,7 +903,7 @@ export function Mesa() {
   }
 
   return (
-    <div className={`${s.screen} ${ahogaste ? s.ahogaste : ''}`}>
+    <div className={`${s.screen} ${ahogaste ? s.ahogaste : ''}`} ref={medirPantalla}>
       {/* Ahogaste al que juega después de ti: no tenía ninguna de las dos
           puntas. Es una buena noticia, así que se celebra en verde y sin
           vibrar — vibrar es para lo que te pasa a ti. */}
@@ -950,6 +978,7 @@ export function Mesa() {
             <Jugador
               p={pareja}
               esPareja
+              acostado
               caido={sinSeñal(pareja)}
               destacado={jugoAhora === pareja.seat}
               paso={pasoDe(pareja.seat)}

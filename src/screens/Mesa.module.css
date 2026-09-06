@@ -58,6 +58,16 @@
   backdrop-filter: blur(3px);
   position: relative;
 }
+/*
+ * El de tu pareja va ACOSTADO. En columna medía 66px de alto, y arriba el alto
+ * es lo único que escasea: con la barra de Chrome a la vista el paño se queda en
+ * ~290px y ese chip solo se llevaba casi una cuarta parte. Los de los costados
+ * siguen en columna, que ahí lo que se paga es ancho y sobra.
+ */
+.rivalAcostado {
+  flex-direction: row; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 4px; border-radius: var(--r-pill);
+}
 .rivalCara { position: relative; width: 30px; height: 30px; flex: 0 0 auto; }
 .arriba { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); z-index: 5; }
 .lado { position: absolute; top: 50%; transform: translateY(-50%); z-index: 5; }

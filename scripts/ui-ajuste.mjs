@@ -200,8 +200,20 @@ let siempreIguales = true
 while (st.hand.status === 'active' && guard++ < 200) {
   const seat = st.hand.current_seat
   if (seat === 0) {
-    if (!(await until('el turno propio', () => /Tu turno/.test(text()), 10000))) break
-    const jugables = [...doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+/*
+ * Esperar a que la MANO esté tocable, no solo a que la pantalla diga "Tu turno".
+ *
+ * Entre medias hay una rendija de milisegundos: `startNext()` hace
+ * `startNextHand` → `refresh()` → y solo entonces suelta `busy`, así que la mano
+ * nueva llega a pintarse con las fichas todavía deshabilitadas. Consultar ahí y
+ * rendirse al primer intento cortaba la partida a mitad. Es la trampa de
+ * siempre: se espera al DOM, no al servidor.
+ */
+    const tocable = () =>
+      [...doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+    if (!(await until('la mano tocable',
+      () => /Tu turno/.test(text()) && tocable().length > 0, 10000))) break
+    const jugables = tocable()
     if (jugables.length === 0) break
     const antes = st.board.length
     click(jugables[0])

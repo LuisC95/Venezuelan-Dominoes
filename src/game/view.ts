@@ -66,6 +66,17 @@ const OPUESTO: Record<Sentido, Sentido> = {
 }
 const enVertical = (s: Sentido) => s === 'arriba' || s === 'abajo'
 
+/**
+ * Cuánto tiene que ganarle el ancho al alto para tumbar la cadena.
+ *
+ * Con 1 la decisión se juega en unos pocos píxeles: medido, un iPhone SE con la
+ * barra de Chrome a la vista caía del lado horizontal por 2px. Lo que hay que
+ * distinguir no es "cuál lado mide más" sino **teléfono de pie contra teléfono
+ * girado**, y girado la caja es apaisada de sobra (3 a 1), así que un umbral
+ * generoso separa los dos casos sin dudar.
+ */
+const FAVOR_VERTICAL = 1.35
+
 /** Dónde y cómo va pintada una ficha del tablero. */
 export type Pieza = {
   /** Índice en `board`. */
@@ -128,7 +139,16 @@ export function tenderCadena(
 ): Acomodo {
   if (dobles.length === 0) return { piezas: [], ancho: 0, alto: 0 }
 
-  const vertical = caja.alto >= caja.ancho
+  /*
+   * El eje principal, con el pulgar puesto en el vertical.
+   *
+   * Decidirlo por "cuál lado mide más" parecía obvio y estaba mal: en un
+   * teléfono corto —con la barra de Chrome a la vista— la caja queda casi
+   * cuadrada y caía del lado horizontal por 8px, con la cadena tendida de lado
+   * en un móvil de pie. Lo reportó el usuario jugando. Solo se va en horizontal
+   * si la caja es CLARAMENTE apaisada, que es cuando el teléfono está girado.
+   */
+  const vertical = caja.alto * FAVOR_VERTICAL >= caja.ancho
   const eje = vertical ? caja.alto : caja.ancho
   const paso = size + gap
   const corto = Math.round(size / 2)

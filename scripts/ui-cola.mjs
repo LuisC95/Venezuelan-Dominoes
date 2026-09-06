@@ -107,8 +107,20 @@ while (st.match.status === 'active' && guard++ < 900) {
 
   const seat = st.hand.current_seat
   if (seat === 0) {
-    if (!(await rafa.until('el turno de Rafa', () => /Tu turno/.test(rafa.text()), 10000))) break
-    const jugables = [...rafa.doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+/*
+ * Esperar a que la MANO esté tocable, no solo a que la pantalla diga "Tu turno".
+ *
+ * Entre medias hay una rendija de milisegundos: `startNext()` hace
+ * `startNextHand` → `refresh()` → y solo entonces suelta `busy`, así que la mano
+ * nueva llega a pintarse con las fichas todavía deshabilitadas. Consultar ahí y
+ * rendirse al primer intento cortaba la partida a mitad. Es la trampa de
+ * siempre: se espera al DOM, no al servidor.
+ */
+    const tocable = () =>
+      [...rafa.doc.querySelectorAll('button[class*="tile"]')].filter((b) => !b.disabled)
+    if (!(await rafa.until('la mano tocable de Rafa',
+      () => /Tu turno/.test(rafa.text()) && tocable().length > 0, 10000))) break
+    const jugables = tocable()
     if (jugables.length === 0) break
     const antes = st.board.length
     rafa.click(jugables[0])
