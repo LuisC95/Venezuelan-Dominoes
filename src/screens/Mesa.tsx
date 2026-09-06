@@ -21,6 +21,7 @@ import type { Pieza } from '../game/view'
 import { RelojTurno, SegundosTurno } from '../components/RelojTurno'
 import { useColaDeJugadas } from '../hooks/useCadenaVisible'
 import { useMano } from '../hooks/useMano'
+import { useZoomEstable } from '../hooks/useZoomEstable'
 import type { FichaMano } from '../hooks/useMano'
 import type {
   BoardTile, GameState, HandEndType, HandTile, RecentMove, Seat, SeatInfo, TeamIndex,
@@ -665,6 +666,38 @@ export function Mesa() {
     state?.hand?.id ?? null, state?.board ?? SIN_FICHAS, state?.recent_moves ?? SIN_JUGADAS,
   )
   const ultimaJugada = cadena.ultima
+
+  /*
+   * El acomodo de la cadena. Va aquí arriba, antes de los `return` tempranos,
+   * porque `useZoomEstable` es un hook: llamarlo más abajo lo dejaría fuera en
+   * los renders que salen antes y React se queja de que cambia el orden.
+   *
+   * El tamaño sale de lo que MIDE el paño, no de una fórmula por número de
+   * fichas: es la única forma de garantizar que la cadena entera se vea sin
+   * scroll cuando el hueco cambia (se abre el chat, entra un aviso, gira el
+   * teléfono). Mientras no haya medida se usa la estimación de siempre.
+   */
+  const board = state?.board ?? SIN_FICHAS
+  const dobles = board.map((t) => isDouble(t.tile))
+  // La ficha de salida ancla el centro. Es la del `board_position` 0: el resto
+  // crece hacia los dos lados desde ella.
+  const iSalida = Math.max(0, board.findIndex((t) => t.position === 0))
+  /*
+   * La caja donde se tiende la cadena se mete hacia dentro lo que ocupan los
+   * chips de los jugadores y el chat, que van ENCIMA del paño: así la cadena no
+   * pasa por debajo de una cara. Se MIDEN, no se estiman (ver los márgenes).
+   */
+  const cajaCadena = {
+    ancho: Math.max(1, cajaTablero.ancho - AIRE_TABLERO * 2
+      - (cajaRival.ancho || MARGEN_LADOS) * 2),
+    alto: Math.max(1, cajaTablero.alto - AIRE_TABLERO * 2
+      - (cajaPareja.alto || MARGEN_ARRIBA) - (cajaChat.alto || MARGEN_ABAJO)),
+  }
+  // Anclado para que solo pueda encoger: ver `useZoomEstable`.
+  const tileSize = useZoomEstable(
+    state?.hand?.id ?? null, cajaCadena,
+    tamanoTablero(dobles, iSalida, cajaCadena, HUECO_TABLERO),
+  )
   const mano = useMano(state?.hand?.id ?? null, state?.my_hand ?? SIN_MANO)
 
   useEffect(() => {
@@ -736,7 +769,7 @@ export function Mesa() {
     )
   }
 
-  const { hand, match, seats, me, board, my_hand: myHand } = state
+  const { hand, match, seats, me, my_hand: myHand } = state
   const target = state.room.points_target
   const iAmSeated = me.seat !== null
   const myTurn = me.is_turn
@@ -750,26 +783,6 @@ export function Mesa() {
   const [aLaIzquierda, pareja, aLaDerecha] = otherSeats(me.seat, seats)
   const passLine = trailingPasses(state.recent_moves, seats)
 
-  // El tamaño sale de lo que mide el tablero, no de una fórmula por número de
-  // fichas: es la única forma de garantizar que la cadena entera se vea sin
-  // scroll cuando el hueco cambia (se abre el chat, entra un aviso, gira el
-  // teléfono). Mientras no haya medida se usa la estimación de siempre.
-  const dobles = board.map((t) => isDouble(t.tile))
-  // La ficha de salida ancla el centro. Es la del `board_position` 0: el resto
-  // crece hacia los dos lados desde ella.
-  const iSalida = Math.max(0, board.findIndex((t) => t.position === 0))
-  /*
-   * La caja donde se tiende la cadena se mete hacia dentro lo que ocupan los
-   * chips de los jugadores, que ahora van ENCIMA del paño: así la cadena no
-   * pasa por debajo de una cara.
-   */
-  const cajaCadena = {
-    ancho: Math.max(1, cajaTablero.ancho - AIRE_TABLERO * 2
-      - (cajaRival.ancho || MARGEN_LADOS) * 2),
-    alto: Math.max(1, cajaTablero.alto - AIRE_TABLERO * 2
-      - (cajaPareja.alto || MARGEN_ARRIBA) - (cajaChat.alto || MARGEN_ABAJO)),
-  }
-  const tileSize = tamanoTablero(dobles, iSalida, cajaCadena, HUECO_TABLERO)
   /*
    * El acomodo se calcula sobre el tablero ENTERO, no sobre lo que ya se ve.
    * Mientras se reproduce una ráfaga de bots eso deja las fichas ya puestas

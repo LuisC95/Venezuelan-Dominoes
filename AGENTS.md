@@ -324,6 +324,15 @@ Seis cosas que costaron tiempo. No las repitas.
    El arnés de jsdom sigue siendo el que comprueba lógica y medidas; el de fotos
    es el que comprueba que se vea.
 
+   Y `scripts/ui-tacto.mjs` (`npm run ui:tacto`) prueba los tres gestos de la
+   mano con **eventos táctiles de verdad**. jsdom dispara eventos de PUNTERO
+   sintéticos; en un teléfono lo que llega primero es un evento TÁCTIL del que el
+   navegador deriva el de puntero, y por el camino puede cancelarlo o robarlo
+   para hacer scroll. Con `BASE=http://<ip-de-la-lan>:4173` se prueba además
+   desde un origen **no seguro**, que es lo que ve un teléfono por WiFi: ahí no
+   existen `navigator.locks`, `serviceWorker` ni `crypto.subtle`. Comprobado: la
+   app funciona igual.
+
 4. **jsdom no ejecuta `<script type="module">`** ni trae `fetch`/`WebSocket`.
    `bootApp()` evalúa el bundle a mano (neutralizando `import.meta`) e inyecta
    las APIs de red de Node. No "arregles" eso.
@@ -574,27 +583,29 @@ Cinco cosas que se rompen por separado si se toca esto:
    medias: a medias se desperdicia medio paño cuando la mano se va toda para un
    lado. Con una sola ficha en mesa sale 50/50, que es el centro exacto.
 
-### La vista se aleja hasta un tope, y a partir de ahí dobla
+### Manda el tamaño; la forma sale sola
 
-`tamanoTablero` tiene tres escalones, y ese orden es la decisión de producto:
+`tamanoTablero` devuelve **la ficha más grande con la que la cadena entera quepa
+en el paño**, doblando lo que haga falta. Mientras quepa recta va recta —que es
+lo que pasa al principio de la mano, con el tamaño al tope—; cuando deja de
+caber, dobla, **sin encoger si doblando cabe más grande**.
 
-1. **Lo más grande que quepa en una sola recta.** La cadena es una línea que se
-   va alejando conforme crece, sin doblar. Es lo más legible que hay.
-2. Si ni al suelo cómodo (`FICHA_MIN`, **28px**) cabe recta, se planta ahí y
-   **dobla**. Ese es el trato que pidió el usuario: alejar hasta el límite y a
-   partir de ahí girar.
-3. Y si ni doblando cabe —paño diminuto con la mesa llena— sigue encogiendo
-   hasta `FICHA_APURO` (18px), porque salirse del paño es peor.
+La primera versión hacía lo contrario: prefería la recta y encogía hasta un
+suelo antes de doblar. En un teléfono de pie iba bien porque el paño es mucho
+más alto que ancho. **En una computadora el paño queda casi cuadrado** (~424×520
+en la columna de 560px), la recta se agota enseguida y las fichas se clavaban en
+el suelo con media pantalla vacía al lado. Lo reportó el usuario jugando. Estaba
+optimizando la forma en vez del tamaño.
 
-El tamaño **nunca crece** al añadir una ficha, así que la cadena no da tirones.
+**`useZoomEstable` ancla el tamaño para que solo pueda bajar.** Al añadir una
+ficha el acomodo se reequilibra —los brazos se reparten distinto, los giros caen
+en otro sitio— y a veces eso libera sitio y saldría un tamaño MAYOR: medido,
+hasta 9px de golpe, que sería la cadena entera pegando un salto. El ancla se
+suelta al cambiar de mano o cuando el paño cambia de tamaño de verdad (girar el
+teléfono, abrir el chat), que ahí sí hay que recalcular.
 
-Con los paños reales, el suelo de 28px deja **14 fichas en línea recta** en un
-teléfono normal (16 en uno grande, 7 en uno de 320px). Subir el suelo cambia ese
-número: a 34px son 12, a 24px son 16. Es la única palanca, y **el número de
-fichas rectas es la forma útil de pensarla**, no los píxeles.
-
-`FICHA_MIN` **no es una promesa**: en el paño más apretado se baja de ahí. La
-prueba lo comprueba así a propósito.
+`FICHA_MIN` (28px) ya no decide nada: es la referencia contra la que las pruebas
+comprueban que la mesa se sigue leyendo. El suelo duro es `FICHA_APURO` (18px).
 
 ### Se ve quién puso cada ficha, y a quién le tocó pasar
 

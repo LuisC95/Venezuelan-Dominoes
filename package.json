@@ -21,7 +21,8 @@
     "ui:perfil": "node scripts/ui-perfil.mjs",
     "ui:ajuste": "node scripts/ui-ajuste.mjs",
     "ui:bots": "node scripts/ui-bots.mjs",
-    "ui:foto": "node scripts/foto.mjs"
+    "ui:foto": "node scripts/foto.mjs",
+    "ui:tacto": "node scripts/ui-tacto.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.114.0",

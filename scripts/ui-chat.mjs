@@ -91,13 +91,23 @@ r.check('se cierra la caja de escribir',
 r.check('los emotes vuelven a estar a mano', !!byText('button', /^¡Data!$/))
 
 r.head('El freno del servidor cuando alguien se emociona')
-// send_message corta a los 8 mensajes en 10s. Se toca hasta que avise.
+/*
+ * send_message corta a los 8 mensajes en 10s. Se toca hasta que avise.
+ *
+ * Lo que se cuenta son ENVÍOS, no intentos: mientras uno va por la red el botón
+ * queda deshabilitado, y contando intentos la mitad se perdían esperando. Con
+ * 12 intentos llegaban 6 envíos y el freno no saltaba nunca — un fallo que
+ * parecía de la app y era del presupuesto de la prueba.
+ */
 let avisó = false
-for (let i = 0; i < 12 && !avisó; i++) {
+let enviados = 0
+const hastaCuando = Date.now() + 20000
+while (!avisó && enviados < 14 && Date.now() < hastaCuando) {
   const pill = byText('button', /^¡Ahí va!$/)
-  if (!pill || pill.disabled) { await wait(120); continue }
+  if (!pill || pill.disabled) { await wait(80); continue }
   click(pill)
-  await wait(250)
+  enviados++
+  await wait(200)
   avisó = /espera un momento/.test(text())
 }
 r.check('avisa en pantalla cuando el servidor frena', avisó)

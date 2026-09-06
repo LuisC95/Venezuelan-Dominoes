@@ -35,9 +35,10 @@ export function boardTileSize(count: number): number {
 export type Caja = { ancho: number; alto: number }
 
 /**
- * Por debajo de esto la ficha deja de leerse en la mano —lo dijo el usuario
- * jugando, con las de 23px—; por encima, no crece más. Al llegar a este suelo la
- * cadena deja de encoger y empieza a doblar.
+ * El tamaño cómodo de referencia —lo dijo el usuario jugando: con 23px se
+ * perdía— y el techo, por encima del cual no crece. `FICHA_MIN` ya no decide
+ * cuándo doblar (eso lo resuelve `tamanoTablero` maximizando el tamaño); es
+ * contra lo que comprueban las pruebas que la mesa se sigue leyendo.
  */
 export const FICHA_MIN = 28
 export const FICHA_MAX = 64
@@ -287,22 +288,29 @@ export function tenderCadena(
 }
 
 /**
- * Por debajo del suelo cómodo solo se baja si no hay más remedio. Es el último
- * recurso: peor que una ficha pequeña es una cadena que se sale del paño.
+ * El suelo por debajo del cual la ficha deja de leerse jugando. Ya no decide
+ * nada por sí solo —ver `tamanoTablero`—, pero es la referencia contra la que
+ * comprueban las pruebas que no nos hemos pasado de listos.
  */
 export const FICHA_APURO = 18
 
 /**
- * De qué tamaño se pintan las fichas.
+ * El tamaño de ficha más grande con el que la cadena entera **cabe en el paño**,
+ * doblando lo que haga falta.
  *
- * Tres escalones, en este orden:
+ * La primera versión prefería la línea recta: encogía hasta el suelo cómodo y
+ * solo entonces doblaba. En un teléfono de pie eso va bien, porque el paño es
+ * mucho más alto que ancho. **En una computadora el paño queda casi cuadrado**,
+ * la recta se agota enseguida y las fichas se clavaban en el suelo con media
+ * pantalla vacía al lado — lo reportó el usuario jugando. Estaba optimizando la
+ * forma en vez del tamaño.
  *
- * 1. **Lo más grande que quepa en una sola recta** por el lado largo del paño.
- *    Es la vista alejándose conforme la cadena crece, sin doblar nunca.
- * 2. Si ni al suelo cómodo (`FICHA_MIN`) cabe recta, se planta ahí y **dobla**.
- *    Ese es el trato: alejar hasta el límite y a partir de ahí girar.
- * 3. Y si ni doblando cabe —paño diminuto con la mesa llena— se sigue encogiendo
- *    por debajo del suelo, porque salirse del paño es peor.
+ * Ahora manda el tamaño y la forma sale sola: mientras la cadena quepa recta, va
+ * recta (es lo que pasa al principio de la mano, con el tamaño al tope); cuando
+ * deja de caber, dobla, pero **sin encoger si doblando cabe más grande**.
+ *
+ * Es monótono: añadir una ficha nunca permite un tamaño mayor, así que la cadena
+ * no da tirones. Lo comprueba la prueba de acomodo.
  *
  * Si la caja todavía no está medida (0×0) devuelve la estimación de siempre;
  * es lo que ve jsdom, que no hace layout.
@@ -316,21 +324,9 @@ export function tamanoTablero(
   if (caja.ancho <= 0 || caja.alto <= 0) return boardTileSize(dobles.length)
   if (dobles.length === 0) return FICHA_MAX
 
-  const eje = Math.max(caja.ancho, caja.alto)
-  const cruce = Math.min(caja.ancho, caja.alto)
-  for (let size = FICHA_MAX; size >= FICHA_MIN; size--) {
-    // Un doble cruzado mide `size` de través: más ancho que la caja no cabe.
-    if (size > cruce) continue
-    if (largoDeCadena(dobles, size, gap) <= eje) return size
-  }
-
-  const cabeDoblando = (size: number) => {
+  for (let size = FICHA_MAX; size > FICHA_APURO; size--) {
     const a = tenderCadena(dobles, salida, size, caja, gap)
-    return a.ancho <= caja.ancho + 0.5 && a.alto <= caja.alto + 0.5
-  }
-  if (cabeDoblando(FICHA_MIN)) return FICHA_MIN
-  for (let size = FICHA_MIN - 1; size > FICHA_APURO; size--) {
-    if (cabeDoblando(size)) return size
+    if (a.ancho <= caja.ancho + 0.5 && a.alto <= caja.alto + 0.5) return size
   }
   return FICHA_APURO
 }

@@ -18,8 +18,13 @@ import { makePlayer, readCache } from './players.mjs'
 
 const CHROME = `${process.env.HOME}/.cache/ms-playwright/chromium-1234/chrome-linux64/chrome`
 const SALIDA = process.env.SALIDA ?? '/tmp/fotos-mesa'
+/** Origen desde el que se carga. Por IP de la LAN NO es contexto seguro, que es
+ *  exactamente lo que ve un teléfono conectado por WiFi. */
+const BASE = process.env.BASE ?? 'http://localhost:4173'
 /** Un teléfono normal de pie, que es como se juega. */
-const PANTALLA = { ancho: 390, alto: 844, escala: 3 }
+const PANTALLA = process.env.PANTALLA === 'pc'
+  ? { ancho: 1280, alto: 900, escala: 2, movil: false }
+  : { ancho: 390, alto: 844, escala: 3, movil: true }
 
 mkdirSync(SALIDA, { recursive: true })
 
@@ -66,12 +71,27 @@ const cdp = (method, params = {}) =>
 
 await cdp('Page.enable')
 await cdp('Runtime.enable')
+await cdp('Log.enable')
+const problemas = []
+const alRecibir = ws.onmessage
+ws.onmessage = (e) => {
+  const m = JSON.parse(e.data)
+  if (m.method === 'Runtime.exceptionThrown') {
+    problemas.push('EXCEPCIÓN: ' + (m.params.exceptionDetails.exception?.description?.split('\n')[0]
+      ?? m.params.exceptionDetails.text))
+  } else if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') {
+    problemas.push('[error] ' + m.params.entry.text?.slice(0, 220))
+  } else if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') {
+    problemas.push('[console] ' + m.params.args.map((a) => a.value ?? a.description).join(' ').slice(0, 220))
+  }
+  alRecibir(e)
+}
 // Un teléfono de verdad: densidad 3 y eventos táctiles, no un escritorio angosto.
 await cdp('Emulation.setDeviceMetricsOverride', {
   width: PANTALLA.ancho, height: PANTALLA.alto,
-  deviceScaleFactor: PANTALLA.escala, mobile: true,
+  deviceScaleFactor: PANTALLA.escala, mobile: PANTALLA.movil,
 })
-await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+await cdp('Emulation.setTouchEmulationEnabled', { enabled: PANTALLA.movil, maxTouchPoints: 5 })
 
 const evaluar = async (expr) => {
   const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })
@@ -147,9 +167,9 @@ for (const p of otros) await p.sb.rpc('heartbeat', { p_room_id: sala.id })
 
 // La sesión de Rafa, sembrada antes de que arranque la app.
 const sesion = JSON.stringify(readCache()['Rafa'].session)
-await ir('http://localhost:4173/')
+await ir(`${BASE}/`)
 await evaluar(`localStorage.setItem('domino.auth', ${JSON.stringify(sesion)})`)
-await ir(`http://localhost:4173/sala/${sala.code}/mesa`)
+await ir(`${BASE}/sala/${sala.code}/mesa`)
 await hasta('la mesa', `/Puntas|Mesa limpia/.test(document.body.textContent)`)
 
 const estado = async () => (await rafa.sb.rpc('get_game_state', {
@@ -198,3 +218,5 @@ clearInterval(latido)
 ws.close()
 chrome.kill()
 console.log(`\nfotos en ${SALIDA}`)
+console.log(`\n--- ${problemas.length} problemas en consola ---`)
+for (const p of [...new Set(problemas)].slice(0, 12)) console.log(' ', p)
