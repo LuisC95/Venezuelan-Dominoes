@@ -381,6 +381,14 @@ cambio**, no a que el servidor lo tenga. Leer el estado desde otro cliente y
 asumir que el navegador ya se enteró produce fallos intermitentes que parecen
 bugs de la app y no lo son.
 
+Y "el DOM lo refleja" no es lo mismo que "el DOM lo dice". `ui-cola` esperaba a
+que la pantalla pusiera *"Tu turno"* y tocaba enseguida, y cortaba la partida a
+mitad una de cada tres veces. La rendija: `startNext()` hace `startNextHand` →
+`refresh()` → y **solo entonces** suelta `busy`, así que la mano nueva llega a
+pintarse con las fichas todavía deshabilitadas. Ahora se espera a que la mano
+esté **tocable**. El atributo `data-puede` de la mano existe para diagnosticar
+esto: distingue "no puedo tocar" de "no tengo jugada".
+
 ---
 
 ## Convenciones
@@ -554,9 +562,21 @@ Ahora:
 - **Las burbujas del chat no cuentan para ese alto**: van en absoluto sobre la
   fila de emotes. Si contaran, la cadena se reacomodaría entera cada vez que
   alguien suelta un emote.
-- **La cadena corre por el lado largo del paño**, que en un teléfono de pie es el
-  vertical. El eje útil pasa de ~226 a ~420px. Girar el teléfono no necesita
-  código aparte: el eje se elige midiendo.
+- **La cadena corre en vertical salvo que la caja sea CLARAMENTE apaisada**
+  (`FAVOR_VERTICAL`, 1.35). El eje útil pasa de ~226 a ~420px. Elegirlo por "cuál
+  lado mide más" parecía lo obvio y estaba mal: en un teléfono corto —con la
+  barra de Chrome a la vista— la caja queda casi cuadrada y caía del lado
+  horizontal **por 8px**, con la cadena tendida de lado en un móvil de pie. Lo
+  reportó el usuario jugando, y no había salido antes porque **las emulaciones de
+  catálogo no traen barra de navegador**. Lo que hay que distinguir no es qué
+  lado mide más, sino teléfono **de pie** contra teléfono **girado**, y girado la
+  caja es apaisada de sobra (3 a 1).
+- Y ese alto se defiende a codazos, porque **en un teléfono corto es lo único que
+  escasea**. Medido en un iPhone SE con barra (553px útiles): el chip de la
+  pareja se llevaba 66px y la fila de emotes otros 64. El de arriba va
+  **acostado** (40px) y los emotes en **una sola línea** con arrastre lateral
+  (27px). Los de los costados siguen en columna: ahí lo que se paga es ancho, y
+  sobra.
 - `tenderCadena` (en `game/view.ts`) es un recorrido con **cursor y sentido**. La
   salida ancla el centro y de ahí salen **dos brazos**: lo jugado por la derecha
   hacia un lado y lo de la izquierda hacia el otro.
@@ -582,6 +602,18 @@ Cinco cosas que se rompen por separado si se toca esto:
 5. **El reparto del eje entre los dos brazos va por lo que mide cada uno**, no a
    medias: a medias se desperdicia medio paño cuando la mano se va toda para un
    lado. Con una sola ficha en mesa sale 50/50, que es el centro exacto.
+
+### Tu mano no puede crecer a costa del tablero
+
+`tamanoMano` solo despejaba el ANCHO, así que **con pocas fichas en mano se iban
+al tope de 104px**: la barra de abajo se comía 191px —el 35% de un teléfono
+corto— y el tablero se quedaba sin alto. Justo al revés de lo que hace falta,
+porque es al final de la mano, con pocas fichas, cuando la cadena es más larga.
+
+Ahora el lado de la ficha también se topa con `PARTE_PANTALLA_MANO` (13% del alto
+de la pantalla). En un teléfono alto no cambia nada; en uno corto le devuelve
+~30px al paño, que es parte de lo que decide si la cadena se tiende a lo largo o
+de lado.
 
 ### Manda el tamaño; la forma sale sola
 
